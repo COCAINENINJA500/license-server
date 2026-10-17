@@ -53,6 +53,7 @@ html,body{margin:0;padding:0}
   --primary:#18181b;--primary-foreground:#fafafa;--accent:#f4f4f5;
   --ring:rgba(9,9,11,.12);--radius:8px;
   --mono:ui-monospace,SFMono-Regular,Consolas,"Liberation Mono",monospace;
+  color-scheme:light;
 }
 [data-theme="dark"]{
   --background:#09090b;--foreground:#fafafa;
@@ -60,6 +61,7 @@ html,body{margin:0;padding:0}
   --muted:#1c1c1f;--muted-foreground:#a1a1aa;--border:#27272a;
   --primary:#fafafa;--primary-foreground:#18181b;--accent:#1c1c1f;
   --ring:rgba(250,250,250,.18);
+  color-scheme:dark;
 }
 body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif;background:var(--background);color:var(--foreground);-webkit-font-smoothing:antialiased;min-height:100vh;font-size:14px;line-height:1.5}
 a{color:inherit}
@@ -126,7 +128,20 @@ input:focus,select:focus,textarea:focus{outline:none;border-color:var(--foregrou
 .search{position:relative;flex:1;min-width:180px;max-width:320px}
 .search svg{position:absolute;left:11px;top:50%;transform:translateY(-50%);width:15px;height:15px;color:var(--muted-foreground)}
 .search input{width:100%;padding:9px 11px 9px 33px;border:1px solid var(--border);background:var(--background);color:var(--foreground);border-radius:var(--radius);font-size:13px}
-select{padding:9px 11px;border:1px solid var(--border);background:var(--background);color:var(--foreground);border-radius:var(--radius);cursor:pointer}
+/* 下拉选择(shadcn 风格,自绘弹层) */
+.select{position:relative;display:inline-block}
+.select-trigger{display:inline-flex;align-items:center;justify-content:space-between;gap:8px;height:36px;min-width:120px;padding:0 11px;border:1px solid var(--border);background:var(--background);color:var(--foreground);border-radius:var(--radius);font-size:13px;cursor:pointer;transition:background .15s,border-color .15s}
+.select-trigger:hover{background:var(--accent)}
+.select-trigger .chev{width:15px;height:15px;color:var(--muted-foreground);flex:0 0 auto;transition:transform .15s}
+.select.open .select-trigger{border-color:var(--foreground)}
+.select.open .select-trigger .chev{transform:rotate(180deg)}
+.select-menu{position:absolute;top:calc(100% + 6px);left:0;min-width:100%;background:var(--card);border:1px solid var(--border);border-radius:10px;box-shadow:0 12px 32px -12px rgba(0,0,0,.28),0 1px 2px rgba(0,0,0,.05);padding:4px;z-index:30;display:none;animation:pop .12s ease}
+.select.open .select-menu{display:block}
+.select-opt{display:flex;align-items:center;justify-content:space-between;gap:10px;width:100%;padding:7px 10px;border:0;background:transparent;color:var(--foreground);font-size:13px;text-align:left;border-radius:7px;cursor:pointer;white-space:nowrap}
+.select-opt:hover{background:var(--accent)}
+.select-opt .check{width:14px;height:14px;flex:0 0 auto;visibility:hidden}
+.select-opt.active{font-weight:600}
+.select-opt.active .check{visibility:visible}
 .table-wrap{overflow:auto;border:1px solid var(--border);border-radius:10px}
 table{width:100%;border-collapse:collapse;font-size:13px;min-width:680px}
 th,td{text-align:left;padding:11px 14px;border-bottom:1px solid var(--border);vertical-align:middle}
@@ -366,6 +381,32 @@ async function loadRecent(){
   }catch(e){}
 }
 
+/* ---------- 下拉选择组件 ---------- */
+var ICON_CHECK='<svg class="check" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg>';
+function selectHTML(id,opts,val){
+  var label='';
+  var menu=opts.map(function(o){
+    if(o[0]===val) label=o[1];
+    return '<button type="button" class="select-opt'+(o[0]===val?' active':'')+'" role="option" data-value="'+esc(o[0])+'" data-label="'+esc(o[1])+'">'+esc(o[1])+ICON_CHECK+'</button>';
+  }).join('');
+  return '<div class="select" id="'+id+'">'+
+    '<button type="button" class="select-trigger" aria-haspopup="listbox" aria-expanded="false"><span class="select-value">'+esc(label)+'</span>'+
+    '<svg class="chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></svg></button>'+
+    '<div class="select-menu" role="listbox">'+menu+'</div></div>';
+}
+function toggleSelect(sel){
+  var open=sel.classList.contains('open');
+  closeAllSelects();
+  if(!open){ sel.classList.add('open'); sel.querySelector('.select-trigger').setAttribute('aria-expanded','true'); }
+}
+function closeAllSelects(){
+  document.querySelectorAll('.select.open').forEach(function(s){
+    s.classList.remove('open');
+    var t=s.querySelector('.select-trigger'); if(t) t.setAttribute('aria-expanded','false');
+  });
+}
+document.addEventListener('click',function(e){ if(!e.target.closest('.select')) closeAllSelects(); });
+
 /* ---------- 台账页 ---------- */
 function renderLicensesPage(){
   $id('page').innerHTML=
@@ -375,12 +416,8 @@ function renderLicensesPage(){
       '<div class="toolbar">'+
         '<div class="search"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>'+
         '<input id="filter" placeholder="搜索客户 / License ID" oninput="onSearch(this.value)"></div>'+
-        '<select id="statusFilter" onchange="onStatus(this.value)">'+
-          '<option value="all">全部状态</option><option value="active">有效</option><option value="expiring">即将到期</option><option value="expired">已过期</option><option value="revoked">已吊销</option>'+
-        '</select>'+
-        '<select id="pageSize" onchange="onPageSize(this.value)">'+
-          '<option value="10">10 条/页</option><option value="20">20 条/页</option><option value="50">50 条/页</option>'+
-        '</select>'+
+        selectHTML('statusFilter',[['all','全部状态'],['active','有效'],['expiring','即将到期'],['expired','已过期'],['revoked','已吊销']],state.status)+
+        selectHTML('pageSize',[['10','10 条/页'],['20','20 条/页'],['50','50 条/页']],String(state.pageSize))+
         '<span class="spacer"></span><button class="btn btn-outline btn-sm" onclick="loadLicenses()">刷新</button>'+
       '</div>'+
       '<div class="table-wrap"><table><thead><tr>'+
@@ -389,8 +426,6 @@ function renderLicensesPage(){
       '<div class="pager" id="pager"></div>'+
     '</section>';
   $id('filter').value=state.q;
-  $id('statusFilter').value=state.status;
-  $id('pageSize').value=String(state.pageSize);
   updateSortHeaders();
 }
 async function loadLicenses(){
@@ -515,6 +550,19 @@ async function downloadIntegration(){
 /* ---------- 页内事件委托 ---------- */
 $id('page').addEventListener('click',function(e){
   var c=e.target.closest('[data-copy]'); if(c){ copy(c.getAttribute('data-copy'),'已复制'); return; }
+  var sel=e.target.closest('.select');
+  if(sel){
+    if(e.target.closest('.select-trigger')){ toggleSelect(sel); return; }
+    var opt=e.target.closest('.select-opt');
+    if(opt){
+      sel.querySelectorAll('.select-opt').forEach(function(o){ o.classList.toggle('active',o===opt); });
+      sel.querySelector('.select-value').textContent=opt.getAttribute('data-label');
+      closeAllSelects();
+      if(sel.id==='statusFilter') onStatus(opt.getAttribute('data-value'));
+      else if(sel.id==='pageSize') onPageSize(opt.getAttribute('data-value'));
+      return;
+    }
+  }
   var th=e.target.closest('th[data-sort]'); if(th){ toggleSort(th.getAttribute('data-sort')); return; }
   var pg=e.target.closest('.pg[data-page]'); if(pg){ if(pg.disabled) return; state.pageNum=parseInt(pg.getAttribute('data-page'),10); loadLicenses(); return; }
   var b=e.target.closest('button[data-act]'); if(!b) return;
@@ -703,7 +751,11 @@ function confirmDialog(title,msg,okLabel,cb){
     '<button class="btn" onclick="runConfirm()">'+esc(okLabel)+'</button></div>');
 }
 function runConfirm(){ var cb=confirmCb; confirmCb=null; closeModal(); if(cb) cb(); }
-document.addEventListener('keydown',function(e){ if(e.key==='Escape') closeModal(); });
+document.addEventListener('keydown',function(e){
+  if(e.key!=='Escape') return;
+  if(document.querySelector('.select.open')){ closeAllSelects(); return; }
+  closeModal();
+});
 </script>
 </body>
 </html>`
