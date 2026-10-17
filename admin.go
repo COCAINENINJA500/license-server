@@ -1,0 +1,870 @@
+package main
+
+import (
+	"encoding/base64"
+	"encoding/hex"
+	"net/http"
+	"strings"
+	"time"
+)
+
+// 内嵌单租户管理台:单文件 HTML(含 CSS/JS,零外部依赖、零 CDN),随二进制发布.
+// 前端为带 hash 路由的多页面 SPA(顶栏切换):概览 / 台账(服务端分页) / 接入指南.
+func (s *Server) handleAdminUI(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	w.Write([]byte(adminHTML))
+}
+
+// GET /admin/integration.md 实时生成"给其他 Coding Agent 的对接文档"并可下载.
+// 内容内嵌当前实例真实公钥与有效期参数.
+func (s *Server) handleIntegrationDoc(w http.ResponseWriter, r *http.Request) {
+	doc := integrationMarkdown(s.pub, s.accessTTL, s.refreshTTL)
+	w.Header().Set("Content-Type", "text/markdown; charset=utf-8")
+	w.Header().Set("Content-Disposition", `attachment; filename="license-server-integration.md"`)
+	_, _ = w.Write([]byte(doc))
+}
+
+func integrationMarkdown(pub []byte, accessTTL, refreshTTL time.Duration) string {
+	return strings.NewReplacer(
+		"{{PUBKEY_B64}}", base64.StdEncoding.EncodeToString(pub),
+		"{{PUBKEY_HEX}}", hex.EncodeToString(pub),
+		"{{ACCESS_TTL}}", accessTTL.String(),
+		"{{REFRESH_TTL}}", refreshTTL.String(),
+	).Replace(integrationDoc)
+}
+
+const adminHTML = `<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="light dark">
+<title>License 管理台</title>
+<script>
+(function(){try{var t=localStorage.getItem('lic_theme')||((window.matchMedia&&matchMedia('(prefers-color-scheme:dark)').matches)?'dark':'light');document.documentElement.setAttribute('data-theme',t);}catch(e){}})();
+</script>
+<style>
+*{box-sizing:border-box}
+html,body{margin:0;padding:0}
+:root{
+  --background:#fafafa;--foreground:#09090b;
+  --card:#ffffff;--card-foreground:#09090b;
+  --muted:#f4f4f5;--muted-foreground:#71717a;--border:#e4e4e7;
+  --primary:#18181b;--primary-foreground:#fafafa;--accent:#f4f4f5;
+  --ring:rgba(9,9,11,.12);--radius:8px;
+  --mono:ui-monospace,SFMono-Regular,Consolas,"Liberation Mono",monospace;
+}
+[data-theme="dark"]{
+  --background:#09090b;--foreground:#fafafa;
+  --card:#0f0f11;--card-foreground:#fafafa;
+  --muted:#1c1c1f;--muted-foreground:#a1a1aa;--border:#27272a;
+  --primary:#fafafa;--primary-foreground:#18181b;--accent:#1c1c1f;
+  --ring:rgba(250,250,250,.18);
+}
+body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif;background:var(--background);color:var(--foreground);-webkit-font-smoothing:antialiased;min-height:100vh;font-size:14px;line-height:1.5}
+a{color:inherit}
+button{font-family:inherit}
+/* 按钮 */
+.btn{display:inline-flex;align-items:center;justify-content:center;gap:6px;height:36px;padding:0 14px;border-radius:var(--radius);font-size:13px;font-weight:500;border:1px solid transparent;background:var(--primary);color:var(--primary-foreground);cursor:pointer;white-space:nowrap;transition:opacity .15s,background .15s,border-color .15s}
+.btn:hover{opacity:.9}
+.btn:active{transform:translateY(.5px)}
+.btn:disabled{opacity:.5;cursor:not-allowed}
+.btn-sm{height:30px;padding:0 10px;font-size:12.5px;border-radius:7px}
+.btn-outline{background:transparent;color:var(--foreground);border-color:var(--border)}
+.btn-outline:hover{background:var(--accent);opacity:1}
+.btn-ghost{background:transparent;color:var(--foreground);border-color:transparent}
+.btn-ghost:hover{background:var(--accent);opacity:1}
+.btn-block{width:100%;height:40px}
+.icon-btn{width:34px;height:34px;border-radius:var(--radius);border:1px solid transparent;background:transparent;color:var(--muted-foreground);display:inline-flex;align-items:center;justify-content:center;cursor:pointer}
+.icon-btn:hover{background:var(--accent);color:var(--foreground)}
+.icon-btn svg{width:17px;height:17px}
+.logo{width:26px;height:26px;border-radius:7px;background:var(--foreground);color:var(--background);display:inline-flex;align-items:center;justify-content:center;flex:0 0 auto}
+.logo svg{width:15px;height:15px}
+input,select,textarea{font-family:inherit;font-size:13px;color:var(--foreground)}
+input:focus,select:focus,textarea:focus{outline:none;border-color:var(--foreground)!important;box-shadow:0 0 0 3px var(--ring)}
+/* 登录 */
+.login-wrap{min-height:100vh;display:flex;align-items:center;justify-content:center;padding:24px}
+.login-card{width:100%;max-width:400px;background:var(--card);border:1px solid var(--border);border-radius:14px;padding:28px;box-shadow:0 1px 2px rgba(0,0,0,.04),0 12px 32px -20px rgba(0,0,0,.25)}
+.login-brand{display:flex;gap:11px;align-items:center;margin-bottom:22px}
+.login-brand h1{font-size:17px;margin:0;font-weight:600}
+.login-brand p{font-size:12.5px;color:var(--muted-foreground);margin:3px 0 0}
+.login-field{display:block;font-size:12.5px;color:var(--muted-foreground);font-weight:500;margin-bottom:14px}
+.login-field input{width:100%;margin-top:6px;border:1px solid var(--border);background:var(--background);color:var(--foreground);border-radius:var(--radius);padding:10px 12px;font-size:14px}
+.login-err{display:none;background:var(--muted);color:var(--foreground);border:1px solid var(--border);border-radius:var(--radius);padding:9px 12px;font-size:12.5px;margin-bottom:14px;font-weight:500}
+/* 顶栏 */
+.topbar{position:sticky;top:0;z-index:40;display:flex;align-items:center;gap:16px;height:56px;padding:0 20px;background:var(--background);border-bottom:1px solid var(--border)}
+.brand{display:flex;align-items:center;gap:9px;font-weight:600;font-size:14px}
+.tabs{display:flex;align-items:center;gap:2px;background:var(--muted);padding:3px;border-radius:9px;margin-left:6px}
+.tabs a{padding:6px 13px;border-radius:7px;font-size:13px;font-weight:500;color:var(--muted-foreground);text-decoration:none;white-space:nowrap}
+.tabs a:hover{color:var(--foreground)}
+.tabs a.active{background:var(--card);color:var(--foreground);box-shadow:0 1px 2px rgba(0,0,0,.08)}
+.topbar-right{margin-left:auto;display:flex;align-items:center;gap:8px}
+.conn{display:inline-flex;align-items:center;gap:6px;font-size:12px;color:var(--muted-foreground)}
+.conn .dot{width:7px;height:7px;border-radius:50%;background:var(--foreground)}
+/* 页面 */
+.wrap{max-width:1080px;margin:0 auto;padding:26px 20px 72px}
+.page-head{margin-bottom:18px}
+.page-head h1{font-size:20px;font-weight:600;margin:0 0 3px;letter-spacing:-.01em}
+.page-head p{color:var(--muted-foreground);font-size:13px;margin:0}
+/* 统计 */
+.stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(148px,1fr));gap:12px;margin-bottom:18px}
+.stat{background:var(--card);color:var(--card-foreground);border:1px solid var(--border);border-radius:12px;padding:16px;box-shadow:0 1px 2px rgba(0,0,0,.04)}
+.stat-v{font-size:22px;font-weight:600;letter-spacing:-.02em;line-height:1.2;font-variant-numeric:tabular-nums}
+.stat-k{font-size:12px;color:var(--muted-foreground);margin-top:5px;font-weight:500}
+/* 卡片 */
+.card{background:var(--card);color:var(--card-foreground);border:1px solid var(--border);border-radius:12px;padding:18px 20px;margin-bottom:16px;box-shadow:0 1px 2px rgba(0,0,0,.04)}
+.card-head{display:flex;align-items:center;gap:10px;margin-bottom:14px;flex-wrap:wrap}
+.card-head h2{font-size:14.5px;margin:0;font-weight:600}
+.hint{font-size:12px;color:var(--muted-foreground)}
+/* 表单 */
+.form-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:12px;align-items:end}
+.field{display:flex;flex-direction:column;gap:6px;font-size:12.5px;color:var(--muted-foreground);font-weight:500}
+.field input,.field textarea{width:100%;border:1px solid var(--border);background:var(--background);color:var(--foreground);border-radius:var(--radius);padding:9px 11px;font-size:13.5px}
+.field textarea{font-family:var(--mono);resize:vertical;min-height:42px}
+/* 工具栏与表格 */
+.toolbar{display:flex;gap:10px;align-items:center;margin-bottom:12px;flex-wrap:wrap}
+.search{position:relative;flex:1;min-width:180px;max-width:320px}
+.search svg{position:absolute;left:11px;top:50%;transform:translateY(-50%);width:15px;height:15px;color:var(--muted-foreground)}
+.search input{width:100%;padding:9px 11px 9px 33px;border:1px solid var(--border);background:var(--background);color:var(--foreground);border-radius:var(--radius);font-size:13px}
+select{padding:9px 11px;border:1px solid var(--border);background:var(--background);color:var(--foreground);border-radius:var(--radius);cursor:pointer}
+.table-wrap{overflow:auto;border:1px solid var(--border);border-radius:10px}
+table{width:100%;border-collapse:collapse;font-size:13px;min-width:680px}
+th,td{text-align:left;padding:11px 14px;border-bottom:1px solid var(--border);vertical-align:middle}
+th{font-size:11.5px;color:var(--muted-foreground);background:var(--muted);font-weight:500;white-space:nowrap}
+th[data-sort]{cursor:pointer;user-select:none}
+th[data-sort]:hover{color:var(--foreground)}
+th[data-sort]::after{content:"";margin-left:5px;font-size:9px;opacity:.4}
+th[data-sort][data-dir="asc"]::after{content:"\25B2";opacity:.8}
+th[data-sort][data-dir="desc"]::after{content:"\25BC";opacity:.8}
+tbody tr:last-child td{border-bottom:0}
+tbody tr:hover{background:var(--accent)}
+.mono{font-family:var(--mono);font-size:12px}
+.id{color:var(--muted-foreground)}
+.sub{font-size:11.5px;color:var(--muted-foreground)}
+.empty{text-align:center;color:var(--muted-foreground);padding:28px}
+.ops{display:flex;gap:6px;flex-wrap:wrap}
+.seat{display:flex;flex-direction:column;gap:5px;min-width:70px}
+.bar{height:5px;border-radius:999px;background:var(--muted);overflow:hidden;display:block}
+.bar i{display:block;height:100%;background:var(--foreground);border-radius:999px;transition:width .3s ease}
+.badge{display:inline-flex;align-items:center;gap:6px;height:22px;padding:0 9px;border-radius:999px;font-size:11.5px;font-weight:500;border:1px solid var(--border);color:var(--muted-foreground);background:transparent;white-space:nowrap}
+.badge .dot{width:6px;height:6px;border-radius:50%;background:currentColor}
+.badge.active{background:var(--primary);color:var(--primary-foreground);border-color:transparent}
+.badge.expiring{border-color:var(--foreground);color:var(--foreground)}
+.badge.expired{color:var(--muted-foreground);opacity:.85}
+.badge.revoked{color:var(--muted-foreground);border-style:dashed}
+/* 分页 */
+.pager{display:flex;align-items:center;gap:8px;justify-content:space-between;margin-top:14px;flex-wrap:wrap}
+.pager-info{font-size:12.5px;color:var(--muted-foreground)}
+.pager-btns{display:flex;gap:6px;align-items:center;flex-wrap:wrap}
+.pg{min-width:32px;height:32px;padding:0 10px;border:1px solid var(--border);background:transparent;color:var(--foreground);border-radius:7px;cursor:pointer;font-size:13px;font-weight:500}
+.pg:hover:not(:disabled){background:var(--accent)}
+.pg.active{background:var(--primary);color:var(--primary-foreground);border-color:transparent}
+.pg:disabled{opacity:.4;cursor:not-allowed}
+.pg-dots{color:var(--muted-foreground);padding:0 3px}
+/* 弹层 */
+.modal-wrap{position:fixed;inset:0;background:rgba(0,0,0,.5);display:none;align-items:center;justify-content:center;z-index:60;padding:16px}
+.modal-wrap.open{display:flex}
+.modal{position:relative;background:var(--card);border:1px solid var(--border);border-radius:14px;max-width:680px;width:100%;max-height:86vh;overflow:auto;padding:22px 24px;box-shadow:0 20px 50px -20px rgba(0,0,0,.5);animation:pop .15s ease}
+.modal-x{position:absolute;top:14px;right:14px;width:30px;height:30px;display:inline-flex;align-items:center;justify-content:center;border:0;background:transparent;color:var(--muted-foreground);border-radius:7px;cursor:pointer}
+.modal-x:hover{background:var(--accent);color:var(--foreground)}
+.modal-x svg{width:16px;height:16px}
+@keyframes pop{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:none}}
+.modal h3{margin:0 0 6px;font-size:16px;font-weight:600;padding-right:32px}
+button:focus-visible,a:focus-visible{outline:2px solid var(--foreground);outline-offset:2px}
+.modal-sub{font-size:12px;margin:18px 0 8px;color:var(--muted-foreground);text-transform:uppercase;letter-spacing:.05em;font-weight:600}
+.modal-msg{color:var(--muted-foreground);font-size:13.5px;margin:4px 0;line-height:1.65}
+.modal-foot{display:flex;gap:10px;justify-content:flex-end;margin-top:18px;flex-wrap:wrap}
+.detail-grid{display:grid;grid-template-columns:120px 1fr;gap:10px 14px;font-size:13.5px;margin-top:14px;align-items:center}
+.kv-k{color:var(--muted-foreground);font-weight:500}
+.kv-v{word-break:break-all;display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+.code{background:var(--muted);border:1px solid var(--border);border-radius:10px;padding:12px 14px;font-family:var(--mono);font-size:12.5px;overflow:auto;margin:0;white-space:pre-wrap;word-break:break-all}
+table.mini{min-width:0}
+.chips{display:flex;gap:8px;flex-wrap:wrap;margin:12px 0}
+.chip{border:1px solid var(--border);background:transparent;color:var(--foreground);border-radius:999px;padding:5px 13px;font-size:12.5px;cursor:pointer}
+.chip:hover{background:var(--accent)}
+.keybox{background:var(--muted);border:1px solid var(--border);border-radius:10px;padding:13px 15px;font-family:var(--mono);font-size:13px;word-break:break-all;margin:12px 0}
+.warn{color:var(--foreground);font-size:12.5px;font-weight:500;display:flex;gap:7px;align-items:flex-start;margin-bottom:4px;line-height:1.55}
+code{background:var(--muted);border:1px solid var(--border);border-radius:5px;padding:1px 6px;font-family:var(--mono);font-size:12.5px}
+.doc-p{font-size:13.5px;line-height:1.8;color:var(--foreground);margin:8px 0}
+.doc-list{margin:6px 0;padding-left:20px;font-size:13.5px;line-height:1.9;color:var(--muted-foreground)}
+/* 提示 */
+#msg{position:fixed;right:18px;bottom:18px;display:flex;flex-direction:column;gap:9px;z-index:80;max-width:min(420px,90vw)}
+.toast{background:var(--card);color:var(--foreground);border:1px solid var(--border);border-left:3px solid var(--foreground);border-radius:10px;padding:11px 15px;font-size:13.5px;box-shadow:0 8px 24px -12px rgba(0,0,0,.4);animation:slidein .18s ease}
+.toast.err{border-left-style:double;border-left-width:4px}
+@keyframes slidein{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:none}}
+@media(max-width:720px){
+  .topbar{height:auto;flex-wrap:wrap;padding:10px 14px;gap:10px}
+  .tabs{margin-left:0;order:3;width:100%;overflow-x:auto}
+  .wrap{padding:20px 14px 60px}
+  .detail-grid{grid-template-columns:100px 1fr}
+}
+</style>
+</head>
+<body>
+<div id="loginView" class="login-wrap">
+<form class="login-card" onsubmit="return doLogin(event)">
+<div class="login-brand">
+<span class="logo"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="7.5" cy="15.5" r="3.5"/><path d="M10.2 12.8 20.5 2.5"/><path d="M16.5 6.5 19 9"/></svg></span>
+<div><h1>License 管理台</h1><p>用 Admin Key 登录,Key 仅保存在本浏览器</p></div>
+</div>
+<div id="loginErr" class="login-err"></div>
+<label class="login-field">Admin Key
+<input id="adminKey" type="password" placeholder="粘贴 Admin Key" autocomplete="current-password" autofocus>
+</label>
+<button id="loginBtn" class="btn btn-block" type="submit">登录</button>
+</form>
+</div>
+<div id="appView" style="display:none">
+<header class="topbar">
+<div class="brand"><span class="logo"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="7.5" cy="15.5" r="3.5"/><path d="M10.2 12.8 20.5 2.5"/><path d="M16.5 6.5 19 9"/></svg></span><span>License 管理台</span></div>
+<nav class="tabs">
+<a href="#/dashboard" data-route="dashboard">概览</a>
+<a href="#/licenses" data-route="licenses">台账</a>
+<a href="#/docs" data-route="docs">接入指南</a>
+</nav>
+<div class="topbar-right">
+<span class="conn"><span class="dot"></span>已连接</span>
+<button id="themeBtn" class="icon-btn" onclick="toggleTheme()" title="切换主题" aria-label="切换主题"></button>
+<button class="btn btn-outline btn-sm" onclick="logout()">退出</button>
+</div>
+</header>
+<main class="wrap" id="page"></main>
+</div>
+<div id="modalWrap" class="modal-wrap" onclick="if(event.target===this)closeModal()"><div class="modal"><button class="modal-x" onclick="closeModal()" aria-label="关闭"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M18 6 6 18M6 6l12 12"/></svg></button><div id="modalBody"></div></div></div>
+<div id="msg"></div>
+<script>
+'use strict';
+var state = {
+  key:'', route:'dashboard',
+  licenses:[], total:0, pageNum:1, pageSize:20, totalPages:1,
+  q:'', status:'all', sort:'created_at', order:'desc',
+  detail:null, searchTimer:null
+};
+var STATUS_LABEL = { active:'有效', expiring:'即将到期', expired:'已过期', revoked:'已吊销' };
+var WEEK = 7*86400;
+
+/* ---------- 通用 ---------- */
+function esc(s){ return String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
+function $id(x){ return document.getElementById(x); }
+function nowSec(){ return Math.floor(Date.now()/1000); }
+var ICON_SUN='<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M2 12h2M20 12h2M5 5l1.4 1.4M17.6 17.6 19 19M19 5l-1.4 1.4M6.4 17.6 5 19"/></svg>';
+var ICON_MOON='<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z"/></svg>';
+function applyTheme(t){
+  document.documentElement.setAttribute('data-theme',t);
+  try{ localStorage.setItem('lic_theme',t); }catch(e){}
+  var b=$id('themeBtn'); if(b) b.innerHTML=(t==='dark'?ICON_SUN:ICON_MOON);
+}
+function toggleTheme(){ applyTheme(document.documentElement.getAttribute('data-theme')==='dark'?'light':'dark'); }
+function toast(msg,type){
+  var d=document.createElement('div'); d.className='toast'+(type?' '+type:''); d.textContent=msg;
+  $id('msg').appendChild(d);
+  setTimeout(function(){ d.style.opacity='0'; d.style.transition='opacity .3s'; setTimeout(function(){ d.remove(); },300); },4200);
+}
+function copy(text,label){
+  var done=function(){ toast(label||'已复制','ok'); };
+  if(navigator.clipboard&&navigator.clipboard.writeText){ navigator.clipboard.writeText(text).then(done)['catch'](function(){ fallbackCopy(text); done(); }); }
+  else { fallbackCopy(text); done(); }
+}
+function fallbackCopy(text){ var t=document.createElement('textarea'); t.value=text; t.style.position='fixed'; t.style.opacity='0'; document.body.appendChild(t); t.select(); try{ document.execCommand('copy'); }catch(e){} t.remove(); }
+
+/* ---------- 鉴权与请求 ---------- */
+function setAuthed(on){ $id('loginView').style.display=on?'none':'flex'; $id('appView').style.display=on?'block':'none'; }
+function loginFail(msg){ var e=$id('loginErr'); e.textContent=msg; e.style.display='block'; }
+async function api(path,method,body){
+  var opts={ method:method||'GET', headers:{ 'Authorization':'Bearer '+state.key } };
+  if(body!==undefined){ opts.headers['Content-Type']='application/json'; opts.body=JSON.stringify(body); }
+  var r=await fetch(path,opts);
+  var data={}; try{ data=await r.json(); }catch(e){}
+  if(r.status===401){ setAuthed(false); state.key=''; try{localStorage.removeItem('lic_admin_key');}catch(e){} loginFail('登录已失效,请重新输入 Admin Key'); throw new Error(data.error||'未授权'); }
+  if(!r.ok) throw new Error(data.error||('HTTP '+r.status));
+  return data;
+}
+async function verifyAndEnter(key){
+  state.key=key;
+  await api('/admin/licenses?page=1&page_size=1');
+  try{ localStorage.setItem('lic_admin_key',key); }catch(e){}
+  setAuthed(true);
+  if(!location.hash) location.hash='#/dashboard';
+  navigate();
+}
+function doLogin(ev){
+  ev.preventDefault();
+  var key=$id('adminKey').value.trim();
+  if(!key){ loginFail('请输入 Admin Key'); return false; }
+  var btn=$id('loginBtn'); btn.disabled=true; btn.textContent='验证中…';
+  $id('loginErr').style.display='none';
+  verifyAndEnter(key).then(function(){ toast('登录成功','ok'); })
+    .catch(function(e){ loginFail('登录失败：'+e.message); })
+    .then(function(){ btn.disabled=false; btn.textContent='登录'; });
+  return false;
+}
+function logout(){
+  state.key=''; state.licenses=[]; state.detail=null;
+  try{ localStorage.removeItem('lic_admin_key'); }catch(e){}
+  $id('adminKey').value='';
+  setAuthed(false);
+}
+(function initAuth(){
+  var saved=''; try{ saved=localStorage.getItem('lic_admin_key')||''; }catch(e){}
+  if(!saved) return;
+  $id('adminKey').value=saved;
+  verifyAndEnter(saved)['catch'](function(){});
+})();
+
+/* ---------- 格式化 ---------- */
+function fmtDate(ts){ return new Date(ts*1000).toLocaleString(); }
+function remain(ts){ var s=ts-nowSec(); return s<=0?'已到期':'剩 '+Math.ceil(s/86400)+' 天'; }
+function statusOf(l){
+  if(l.status==='revoked') return 'revoked';
+  var s=l.expires_at-nowSec();
+  if(s<=0) return 'expired';
+  if(s<=WEEK) return 'expiring';
+  return 'active';
+}
+function remainCls(l){ var st=statusOf(l); return (st==='expired'||st==='revoked')?'danger':(st==='expiring')?'warn':''; }
+
+/* ---------- 路由 ---------- */
+function navigate(){
+  var h=(location.hash||'').replace(/^#\/?/,'').split('?')[0] || 'dashboard';
+  if(['dashboard','licenses','docs'].indexOf(h)<0) h='dashboard';
+  state.route=h;
+  document.querySelectorAll('.tabs a').forEach(function(a){ a.classList.toggle('active', a.getAttribute('data-route')===h); });
+  if(h==='licenses'){ renderLicensesPage(); loadLicenses(); }
+  else if(h==='docs'){ renderDocsPage(); loadPubkey(); }
+  else { renderDashboardPage(); loadStats(); loadRecent(); }
+}
+window.addEventListener('hashchange', navigate);
+
+/* ---------- 概览页 ---------- */
+function renderDashboardPage(){
+  $id('page').innerHTML=
+    '<div class="page-head"><h1>概览</h1><p>License 总览与最近签发记录</p></div>'+
+    '<section class="stats" id="stats"></section>'+
+    '<section class="card"><div class="card-head"><h2>最近签发</h2><span class="spacer"></span><button class="btn btn-outline btn-sm" onclick="openIssue()">签发 License</button></div>'+
+    '<div class="table-wrap"><table><thead><tr><th>客户</th><th>License ID</th><th>席位</th><th>到期</th><th>状态</th><th></th></tr></thead>'+
+    '<tbody id="recent"><tr><td colspan="6" class="empty">加载中…</td></tr></tbody></table></div></section>';
+}
+async function loadStats(){ try{ renderStats(await api('/admin/stats')); }catch(e){} }
+function renderStats(d){
+  var cards=[
+    { k:'License 总数', v:d.total },
+    { k:'有效', v:d.active },
+    { k:'即将到期 (≤7天)', v:d.expiring },
+    { k:'已过期', v:d.expired },
+    { k:'已吊销', v:d.revoked },
+    { k:'席位占用', v:d.used+' / '+d.seats }
+  ];
+  var el=$id('stats'); if(!el) return;
+  el.innerHTML=cards.map(function(c){ return '<div class="stat"><div class="stat-v">'+esc(String(c.v))+'</div><div class="stat-k">'+esc(c.k)+'</div></div>'; }).join('');
+}
+async function loadRecent(){
+  try{
+    var d=await api('/admin/licenses?page=1&page_size=8&sort=created_at&order=desc&status=all&q=');
+    var tb=$id('recent'); if(!tb) return;
+    var list=d.licenses||[];
+    tb.innerHTML=list.length?list.map(function(l){ return licenseRowHTML(l,true); }).join(''):'<tr><td colspan="6" class="empty">暂无数据</td></tr>';
+  }catch(e){}
+}
+
+/* ---------- 台账页 ---------- */
+function renderLicensesPage(){
+  $id('page').innerHTML=
+    '<div class="page-head"><h1>台账</h1><p>签发、检索、续期、吊销与删除</p></div>'+
+    '<section class="card">'+
+      '<div class="card-head"><h2>License 列表</h2><span id="count" class="hint mono"></span><span class="spacer"></span><button class="btn btn-sm" onclick="openIssue()">签发 License</button></div>'+
+      '<div class="toolbar">'+
+        '<div class="search"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>'+
+        '<input id="filter" placeholder="搜索客户 / License ID" oninput="onSearch(this.value)"></div>'+
+        '<select id="statusFilter" onchange="onStatus(this.value)">'+
+          '<option value="all">全部状态</option><option value="active">有效</option><option value="expiring">即将到期</option><option value="expired">已过期</option><option value="revoked">已吊销</option>'+
+        '</select>'+
+        '<select id="pageSize" onchange="onPageSize(this.value)">'+
+          '<option value="10">10 条/页</option><option value="20">20 条/页</option><option value="50">50 条/页</option>'+
+        '</select>'+
+        '<span class="spacer"></span><button class="btn btn-outline btn-sm" onclick="loadLicenses()">刷新</button>'+
+      '</div>'+
+      '<div class="table-wrap"><table><thead><tr>'+
+        '<th data-sort="customer">客户</th><th data-sort="license_id">License ID</th><th data-sort="seats">席位</th><th data-sort="expires_at">到期</th><th data-sort="status">状态</th><th>操作</th>'+
+      '</tr></thead><tbody id="rows"><tr><td colspan="6" class="empty">加载中…</td></tr></tbody></table></div>'+
+      '<div class="pager" id="pager"></div>'+
+    '</section>';
+  $id('filter').value=state.q;
+  $id('statusFilter').value=state.status;
+  $id('pageSize').value=String(state.pageSize);
+  updateSortHeaders();
+}
+async function loadLicenses(){
+  try{
+    var qs='/admin/licenses?page='+state.pageNum+'&page_size='+state.pageSize+
+      '&sort='+encodeURIComponent(state.sort)+'&order='+state.order+
+      '&status='+encodeURIComponent(state.status)+'&q='+encodeURIComponent(state.q);
+    var d=await api(qs);
+    state.licenses=d.licenses||[];
+    state.total=d.total||0;
+    state.totalPages=Math.max(1,d.total_pages||1);
+    if(state.pageNum>state.totalPages){ state.pageNum=state.totalPages; return loadLicenses(); }
+    fillLicenses();
+  }catch(e){ if(state.key) toast('加载失败：'+e.message,'err'); }
+}
+function licenseRowHTML(l,minimal){
+  var st=statusOf(l);
+  var full=(l.used||0)>=(l.seats||0);
+  var pct=l.seats?Math.min(100,Math.round((l.used||0)/l.seats*100)):0;
+  var ops='<button class="btn btn-outline btn-sm" data-act="detail" data-id="'+esc(l.license_id)+'">详情</button>';
+  if(!minimal){
+    ops+='<button class="btn btn-outline btn-sm" data-act="extend" data-id="'+esc(l.license_id)+'">续期</button>';
+    ops+= l.status==='active'
+      ? '<button class="btn btn-outline btn-sm" data-act="revoke" data-id="'+esc(l.license_id)+'">吊销</button>'
+      : '<button class="btn btn-outline btn-sm" data-act="restore" data-id="'+esc(l.license_id)+'">恢复</button>';
+    ops+='<button class="btn btn-ghost btn-sm" data-act="delete" data-id="'+esc(l.license_id)+'">删除</button>';
+  }
+  return '<tr>'+
+    '<td>'+esc(l.customer)+'</td>'+
+    '<td><span class="mono id" title="'+esc(l.license_id)+'">'+esc(l.license_id)+'</span></td>'+
+    '<td><div class="seat'+(full?' full':'')+'"><span class="mono">'+(l.used||0)+' / '+l.seats+'</span><span class="bar"><i style="width:'+pct+'%"></i></span></div></td>'+
+    '<td><div>'+fmtDate(l.expires_at)+'</div><div class="sub '+remainCls(l)+'">'+remain(l.expires_at)+'</div></td>'+
+    '<td><span class="badge '+st+'"><span class="dot"></span>'+STATUS_LABEL[st]+'</span></td>'+
+    '<td><div class="ops">'+ops+'</div></td></tr>';
+}
+function fillLicenses(){
+  $id('count').textContent='共 '+state.total+' 条';
+  var tb=$id('rows');
+  if(!state.licenses.length){ tb.innerHTML='<tr><td colspan="6" class="empty">暂无数据</td></tr>'; buildPager(); return; }
+  tb.innerHTML=state.licenses.map(function(l){ return licenseRowHTML(l,false); }).join('');
+  buildPager();
+}
+function pageNumbers(p,tp){
+  if(tp<=7){ var all=[]; for(var i=1;i<=tp;i++) all.push(i); return all; }
+  var set=[1,tp,p-1,p,p+1].filter(function(n){ return n>=1&&n<=tp; }).sort(function(a,b){ return a-b; });
+  var out=[],prev=0;
+  set.forEach(function(n){ if(n-prev>1) out.push('...'); out.push(n); prev=n; });
+  return out;
+}
+function buildPager(){
+  var p=state.pageNum, tp=state.totalPages;
+  var html='<div class="pager-info">第 '+p+' / '+tp+' 页 · 共 '+state.total+' 条</div><div class="pager-btns">';
+  html+='<button class="pg" data-page="'+(p-1)+'"'+(p<=1?' disabled':'')+'>上一页</button>';
+  pageNumbers(p,tp).forEach(function(n){
+    if(n==='...') html+='<span class="pg-dots">…</span>';
+    else html+='<button class="pg'+(n===p?' active':'')+'" data-page="'+n+'">'+n+'</button>';
+  });
+  html+='<button class="pg" data-page="'+(p+1)+'"'+(p>=tp?' disabled':'')+'>下一页</button></div>';
+  var el=$id('pager'); if(el) el.innerHTML=html;
+}
+function updateSortHeaders(){
+  document.querySelectorAll('#page th[data-sort]').forEach(function(th){
+    var k=th.getAttribute('data-sort');
+    if(k===state.sort) th.setAttribute('data-dir',state.order); else th.removeAttribute('data-dir');
+  });
+}
+function onSearch(v){ state.q=v; state.pageNum=1; clearTimeout(state.searchTimer); state.searchTimer=setTimeout(loadLicenses,300); }
+function onStatus(v){ state.status=v; state.pageNum=1; loadLicenses(); }
+function onPageSize(v){ state.pageSize=parseInt(v,10)||20; state.pageNum=1; loadLicenses(); }
+function toggleSort(k){
+  if(state.sort===k){ state.order=state.order==='asc'?'desc':'asc'; }
+  else { state.sort=k; state.order=(k==='customer'||k==='license_id')?'asc':'desc'; }
+  state.pageNum=1; updateSortHeaders(); loadLicenses();
+}
+
+/* ---------- 接入指南页 ---------- */
+function renderDocsPage(){
+  $id('page').innerHTML=
+    '<div class="page-head"><h1>接入指南</h1><p>把 License 鉴权接入你的软件</p></div>'+
+    '<section class="card"><div class="card-head"><h2>给 Coding Agent 的对接文档</h2><span class="spacer"></span>'+
+      '<button class="btn btn-sm" onclick="downloadIntegration()">下载对接文档</button></div>'+
+      '<p class="doc-p">一键下载一份 Markdown 对接文档(内嵌本实例真实公钥与有效期参数),直接丢给其他 Coding Agent 即可按规范实现客户端:激活、本地验签、refresh 续期、错误处理,以及管理 API 一览。</p></section>'+
+    '<section class="card"><div class="card-head"><h2>客户端公钥</h2><span class="hint">随客户端发布,用于本地验签 access JWT</span></div>'+
+      '<div id="pubkeyBox"><div class="empty">加载中…</div></div></section>'+
+    '<section class="card"><div class="card-head"><h2>功能标记 (features)</h2></div>'+
+      '<p class="doc-p">features 是绑定在 license 上的<b>任意 JSON</b>。签发时入库,并在每次 <code>activate</code> / <code>refresh</code> 写入 access JWT 的 <code>features</code> 声明(服务端 Ed25519 签名)。客户端本地验签后读取,用于功能开关与配额,例如:</p>'+
+      '<pre class="code">{ "pro": true, "max_projects": 20 }</pre>'+
+      '<p class="doc-p">可在台账「详情 → 编辑功能」修改,客户端下次 refresh 后生效。</p></section>'+
+    '<section class="card"><div class="card-head"><h2>模型与安全</h2></div>'+
+      '<ul class="doc-list">'+
+        '<li>两张表 <code>licenses</code> / <code>activations</code>;库中只存 license_key 的 SHA256。</li>'+
+        '<li>席位:激活行数 ≤ seats;同机重复激活幂等。</li>'+
+        '<li>吊销/过期/超席位/被踢 都在 refresh 卡点生效(最长延迟 1 个 access 有效期)。</li>'+
+        '<li>防重放:timestamp(±5 分钟)+ nonce(内存去重 10 分钟)。</li>'+
+        '<li>生产请全程 TLS:<code>--tls-cert/--tls-key</code> 或反向代理。</li>'+
+      '</ul></section>';
+}
+async function loadPubkey(){
+  try{
+    var d=await api('/v1/pubkey');
+    $id('pubkeyBox').innerHTML='<div class="detail-grid">'+
+      kv('算法',esc(d.alg||'EdDSA'))+
+      kv('公钥 (base64)','<span class="mono">'+esc(d.pubkey_b64)+'</span><button class="btn btn-outline btn-sm" data-copy="'+esc(d.pubkey_b64)+'">复制</button>')+
+      kv('公钥 (hex)','<span class="mono">'+esc(d.pubkey_hex)+'</span><button class="btn btn-outline btn-sm" data-copy="'+esc(d.pubkey_hex)+'">复制</button>')+
+    '</div>';
+  }catch(e){ $id('pubkeyBox').innerHTML='<div class="empty">加载失败：'+esc(e.message)+'</div>'; }
+}
+async function downloadIntegration(){
+  try{
+    var r=await fetch('/admin/integration.md',{ headers:{ 'Authorization':'Bearer '+state.key } });
+    if(r.status===401){ setAuthed(false); state.key=''; try{localStorage.removeItem('lic_admin_key');}catch(e){} loginFail('登录已失效,请重新输入 Admin Key'); return; }
+    if(!r.ok) throw new Error('HTTP '+r.status);
+    var text=await r.text();
+    var url=URL.createObjectURL(new Blob([text],{type:'text/markdown;charset=utf-8'}));
+    var a=document.createElement('a'); a.href=url; a.download='license-server-integration.md';
+    document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(function(){ URL.revokeObjectURL(url); },1000);
+    toast('已开始下载对接文档','ok');
+  }catch(e){ toast('下载失败：'+e.message,'err'); }
+}
+
+/* ---------- 页内事件委托 ---------- */
+$id('page').addEventListener('click',function(e){
+  var c=e.target.closest('[data-copy]'); if(c){ copy(c.getAttribute('data-copy'),'已复制'); return; }
+  var th=e.target.closest('th[data-sort]'); if(th){ toggleSort(th.getAttribute('data-sort')); return; }
+  var pg=e.target.closest('.pg[data-page]'); if(pg){ if(pg.disabled) return; state.pageNum=parseInt(pg.getAttribute('data-page'),10); loadLicenses(); return; }
+  var b=e.target.closest('button[data-act]'); if(!b) return;
+  var act=b.getAttribute('data-act'), id=b.getAttribute('data-id');
+  if(act==='detail') showDetail(id);
+  else if(act==='extend') extendDialog(id);
+  else if(act==='revoke') confirmDialog('吊销 License','确定吊销该 license？已激活设备将在 access 过期后（最长 1 个 access 有效期）被拒。','吊销',function(){ revoke(id); });
+  else if(act==='restore') restore(id);
+  else if(act==='delete') confirmDialog('删除 License','将彻底删除该 license 及其全部设备激活记录,且不可恢复。确定继续？','删除',function(){ del(id); });
+});
+
+/* ---------- 弹层事件委托 ---------- */
+$id('modalBody').addEventListener('click',function(e){
+  var c=e.target.closest('[data-copy]'); if(c){ copy(c.getAttribute('data-copy'),'已复制'); return; }
+  var b=e.target.closest('button[data-act]'); if(!b) return;
+  var act=b.getAttribute('data-act'), id=b.getAttribute('data-id'), mh=b.getAttribute('data-mhash');
+  if(act==='kick'){ confirmDialog('踢掉设备','确定踢掉该设备并释放席位？该设备下次续期将被拒绝。','踢掉',function(){ kick(id,mh); }); }
+  else if(act==='unbindall'){ confirmDialog('解绑全部设备','将移除该 license 的全部设备绑定并释放席位,相关设备下次续期将被拒绝。','解绑',function(){ unbindAll(id); }); }
+  else if(act==='editlicense'){ editLicenseDialog(); }
+  else if(act==='editfeat'){ editFeaturesDialog(); }
+  else if(act==='extend'){ closeModal(); extendDialog(id); }
+  else if(act==='revoke'){ confirmDialog('吊销 License','确定吊销该 license？','吊销',function(){ revoke(id); }); }
+  else if(act==='restore'){ restore(id); }
+  else if(act==='delete'){ confirmDialog('删除 License','将彻底删除该 license 及其全部设备激活记录,且不可恢复。确定继续？','删除',function(){ del(id); }); }
+});
+
+/* ---------- 签发 ---------- */
+function openIssue(){
+  openModal('<h3>签发 License</h3>'+
+    '<div class="form-grid"><label class="field">客户名<input id="fCustomer" placeholder="Acme"></label>'+
+    '<label class="field">有效天数<input id="fDays" type="number" value="365" min="1" max="3650"></label>'+
+    '<label class="field">席位数<input id="fSeats" type="number" value="5" min="1" max="100000"></label></div>'+
+    '<label class="field" style="margin-top:12px">功能标记 (JSON,可留空)<textarea id="fFeatures" rows="3">{ "pro": true }</textarea></label>'+
+    '<p class="hint" style="margin-top:8px">功能标记会写入 access JWT,客户端验签后读取做功能开关/配额。</p>'+
+    '<div class="modal-foot"><button class="btn btn-outline" onclick="closeModal()">取消</button><button class="btn" id="issueBtn" onclick="issue()">签发</button></div>');
+}
+async function issue(){
+  var customer=$id('fCustomer').value.trim();
+  var days=parseInt($id('fDays').value,10);
+  var seats=parseInt($id('fSeats').value,10);
+  var raw=$id('fFeatures').value.trim()||'{}';
+  var features; try{ features=JSON.parse(raw); }catch(e){ toast('功能标记不是合法 JSON','err'); return; }
+  var btn=$id('issueBtn'); btn.disabled=true;
+  try{
+    var out=await api('/admin/licenses','POST',{ customer:customer, days:days, seats:seats, features:features });
+    closeModal();
+    openModal('<h3>签发成功</h3>'+
+      '<div class="warn">license_key 明文只显示这一次,请立即复制发给客户;服务端只存其 SHA256 哈希。</div>'+
+      '<div class="keybox">'+esc(out.license_key)+'</div>'+
+      '<div class="modal-foot"><button class="btn btn-outline" onclick="closeModal()">关闭</button>'+
+      '<button class="btn btn-outline" data-copy="'+esc(out.license_key)+'">复制 Key</button>'+
+      '<button class="btn" onclick="closeModal();showDetail(\''+esc(out.license_id)+'\')">查看详情</button></div>');
+    refreshCurrent();
+  }catch(e){ toast('签发失败：'+e.message,'err'); btn.disabled=false; }
+}
+
+/* ---------- 详情 ---------- */
+function kv(k,v){ return '<div class="kv-k">'+esc(k)+'</div><div class="kv-v">'+v+'</div>'; }
+async function showDetail(id){
+  try{
+    var data=await api('/admin/licenses/'+encodeURIComponent(id));
+    state.detail=data.license;
+    var l=data.license, ms=data.machines||[];
+    var featStr; try{ featStr=JSON.stringify(l.features,null,2); }catch(e){ featStr=String(l.features); }
+    var st=statusOf(l);
+    var mrows=ms.length?ms.map(function(m){
+      return '<tr><td class="mono">'+esc(m.machine_hash)+'</td><td class="sub">'+fmtDate(m.first_seen)+'</td><td class="sub">'+fmtDate(m.last_seen)+'</td>'+
+        '<td><button class="btn btn-outline btn-sm" data-act="kick" data-id="'+esc(l.license_id)+'" data-mhash="'+esc(m.machine_hash)+'">踢掉</button></td></tr>';
+    }).join(''):'<tr><td colspan="4" class="empty">暂无激活设备</td></tr>';
+    var toggle=l.status==='active'
+      ? '<button class="btn btn-outline" data-act="revoke" data-id="'+esc(l.license_id)+'">吊销</button>'
+      : '<button class="btn btn-outline" data-act="restore" data-id="'+esc(l.license_id)+'">恢复</button>';
+    openModal('<h3>台账详情</h3>'+
+      '<div class="detail-grid">'+
+        kv('客户',esc(l.customer))+
+        kv('License ID','<span class="mono">'+esc(l.license_id)+'</span><button class="btn btn-outline btn-sm" data-copy="'+esc(l.license_id)+'">复制</button>')+
+        kv('状态','<span class="badge '+st+'"><span class="dot"></span>'+STATUS_LABEL[st]+'</span>')+
+        kv('席位',(l.used||0)+' / '+l.seats)+
+        kv('到期',fmtDate(l.expires_at)+' · '+remain(l.expires_at))+
+        kv('创建',fmtDate(l.created_at))+
+      '</div>'+
+      '<div class="card-head" style="margin:18px 0 8px"><h4 class="modal-sub" style="margin:0">功能标记</h4><span class="spacer"></span>'+
+        '<button class="btn btn-outline btn-sm" data-act="editfeat" data-id="'+esc(l.license_id)+'">编辑功能</button></div>'+
+      '<pre class="code">'+esc(featStr)+'</pre>'+
+      '<div class="card-head" style="margin:18px 0 8px"><h4 class="modal-sub" style="margin:0">已激活设备（'+ms.length+'）</h4><span class="spacer"></span>'+
+        (ms.length?'<button class="btn btn-outline btn-sm" data-act="unbindall" data-id="'+esc(l.license_id)+'">解绑全部</button>':'')+'</div>'+
+      '<div class="table-wrap"><table class="mini"><thead><tr><th>machine_hash</th><th>首次</th><th>最近</th><th></th></tr></thead><tbody>'+mrows+'</tbody></table></div>'+
+      '<div class="modal-foot"><button class="btn btn-outline" data-act="editlicense" data-id="'+esc(l.license_id)+'">编辑</button>'+
+      '<button class="btn btn-outline" data-act="extend" data-id="'+esc(l.license_id)+'">续期</button>'+toggle+
+      '<button class="btn btn-ghost" data-act="delete" data-id="'+esc(l.license_id)+'">删除</button>'+
+      '<button class="btn btn-outline" onclick="closeModal()">关闭</button></div>');
+  }catch(e){ toast('查询失败：'+e.message,'err'); }
+}
+function editLicenseDialog(){
+  var l=state.detail; if(!l) return;
+  openModal('<h3>编辑 License</h3>'+
+    '<div class="form-grid"><label class="field">客户名<input id="eCustomer" value="'+esc(l.customer)+'"></label>'+
+    '<label class="field">席位数<input id="eSeats" type="number" min="1" max="100000" value="'+l.seats+'"></label></div>'+
+    '<p class="hint" style="margin-top:8px">当前已占用 '+(l.used||0)+' 席位;若下调到低于占用量,超出部分设备将在下次 refresh 被拒。</p>'+
+    '<div class="modal-foot"><button class="btn btn-outline" onclick="closeModal()">取消</button>'+
+    '<button class="btn" onclick="saveLicense()">保存</button></div>');
+}
+async function saveLicense(){
+  var l=state.detail; if(!l) return;
+  var customer=$id('eCustomer').value.trim();
+  var seats=parseInt($id('eSeats').value,10);
+  if(!customer){ toast('客户名必填','err'); return; }
+  if(!seats||seats<1||seats>100000){ toast('席位需为 1~100000','err'); return; }
+  try{
+    await api('/admin/licenses/'+encodeURIComponent(l.license_id)+'/update','POST',{ customer:customer, seats:seats });
+    toast('已保存','ok'); showDetail(l.license_id); refreshCurrent();
+  }catch(e){ toast('保存失败：'+e.message,'err'); }
+}
+function editFeaturesDialog(){
+  var l=state.detail; if(!l) return;
+  var cur=''; try{ cur=JSON.stringify(l.features,null,2); }catch(e){ cur=String(l.features||'{}'); }
+  openModal('<h3>编辑功能标记</h3>'+
+    '<p class="modal-msg">修改后,客户端下次 refresh 即拿到新值(已签发的 access 仍为旧值,直到过期)。</p>'+
+    '<label class="field" style="margin-top:10px">features (JSON)<textarea id="featEdit" rows="6">'+esc(cur)+'</textarea></label>'+
+    '<div class="modal-foot"><button class="btn btn-outline" onclick="closeModal()">取消</button>'+
+    '<button class="btn" onclick="saveFeatures()">保存</button></div>');
+}
+async function saveFeatures(){
+  var id=state.detail&&state.detail.license_id; if(!id) return;
+  var raw=$id('featEdit').value.trim();
+  var v; try{ v=JSON.parse(raw); }catch(e){ toast('不是合法 JSON','err'); return; }
+  try{ await api('/admin/licenses/'+encodeURIComponent(id)+'/features','POST',{ features:v }); closeModal(); toast('功能标记已更新','ok'); showDetail(id); }
+  catch(e){ toast('保存失败：'+e.message,'err'); }
+}
+
+/* ---------- 操作 ---------- */
+function refreshCurrent(){
+  if(state.route==='licenses') loadLicenses();
+  else if(state.route==='dashboard'){ loadStats(); loadRecent(); }
+}
+function refreshModal(id){ if($id('modalWrap').classList.contains('open') && state.detail && state.detail.license_id===id) showDetail(id); }
+async function revoke(id){
+  try{ await api('/admin/licenses/'+encodeURIComponent(id)+'/revoke','POST',{}); toast('已吊销','ok'); refreshCurrent(); refreshModal(id); }
+  catch(e){ toast('吊销失败：'+e.message,'err'); }
+}
+async function restore(id){
+  try{ await api('/admin/licenses/'+encodeURIComponent(id)+'/restore','POST',{}); toast('已恢复','ok'); refreshCurrent(); refreshModal(id); }
+  catch(e){ toast('恢复失败：'+e.message,'err'); }
+}
+async function del(id){
+  try{ await api('/admin/licenses/'+encodeURIComponent(id),'DELETE'); closeModal(); toast('已删除','ok'); refreshCurrent(); }
+  catch(e){ toast('删除失败：'+e.message,'err'); }
+}
+async function kick(id,mh){
+  try{ await api('/admin/licenses/'+encodeURIComponent(id)+'/machines/'+encodeURIComponent(mh),'DELETE'); toast('已踢掉设备','ok'); refreshCurrent(); refreshModal(id); }
+  catch(e){ toast('踢设备失败：'+e.message,'err'); }
+}
+async function unbindAll(id){
+  try{ await api('/admin/licenses/'+encodeURIComponent(id)+'/machines','DELETE'); toast('已解绑全部设备','ok'); refreshCurrent(); refreshModal(id); }
+  catch(e){ toast('解绑失败：'+e.message,'err'); }
+}
+function setExtDays(d){ var el=$id('extDays'); if(el) el.value=d; }
+function extendDialog(id){
+  var chips=[30,90,180,365].map(function(d){ return '<button class="chip" onclick="setExtDays('+d+')">'+d+' 天</button>'; }).join('');
+  openModal('<h3>续期</h3>'+
+    '<p class="modal-msg">为 license <span class="mono">'+esc(id)+'</span> 增加有效期（已过期的从现在起算）。</p>'+
+    '<div class="chips">'+chips+'</div>'+
+    '<label class="field" style="max-width:220px">增加天数<input id="extDays" type="number" min="1" max="3650" value="30"></label>'+
+    '<div class="modal-foot"><button class="btn btn-outline" onclick="closeModal()">取消</button>'+
+    '<button class="btn" onclick="doExtend(\''+esc(id)+'\')">确认续期</button></div>');
+}
+async function doExtend(id){
+  var n=parseInt($id('extDays').value,10);
+  if(!n||n<1||n>3650){ toast('天数需为 1~3650','err'); return; }
+  var wasDetail=!!(state.detail&&state.detail.license_id===id);
+  try{
+    var out=await api('/admin/licenses/'+encodeURIComponent(id)+'/extend','POST',{ add_days:n });
+    closeModal(); toast('已续期,新到期：'+fmtDate(out.expires_at),'ok'); refreshCurrent();
+    if(wasDetail) showDetail(id);
+  }catch(e){ toast('续期失败：'+e.message,'err'); }
+}
+
+/* ---------- 弹层 ---------- */
+var confirmCb=null;
+function openModal(html){ $id('modalBody').innerHTML=html; $id('modalWrap').classList.add('open'); document.body.style.overflow='hidden'; }
+function closeModal(){ $id('modalWrap').classList.remove('open'); $id('modalBody').innerHTML=''; confirmCb=null; document.body.style.overflow=''; }
+function confirmDialog(title,msg,okLabel,cb){
+  confirmCb=cb;
+  openModal('<h3>'+esc(title)+'</h3><p class="modal-msg">'+esc(msg)+'</p>'+
+    '<div class="modal-foot"><button class="btn btn-outline" onclick="closeModal()">取消</button>'+
+    '<button class="btn" onclick="runConfirm()">'+esc(okLabel)+'</button></div>');
+}
+function runConfirm(){ var cb=confirmCb; confirmCb=null; closeModal(); if(cb) cb(); }
+document.addEventListener('keydown',function(e){ if(e.key==='Escape') closeModal(); });
+</script>
+</body>
+</html>`
+
+const integrationDoc = `# License Server 对接文档（面向 Coding Agent）
+
+> 目标读者:需要把"受控分发/授权"接入本服务的客户端或后台开发 Agent。
+> 本文档由服务端实时生成,其中的公钥与有效期参数即为当前实例真实值。
+
+## TL;DR
+
+- 客户端只做两件事:**本地验 access JWT 签名** + **过期前后台 refresh**。
+- 激活用 license_key + machine_hash;之后用 refresh token 续期,refresh 每次轮换。
+- 吊销 / 过期 / 超席位 / 被踢设备 全部在 refresh 被拒(最长延迟 1 个 access 有效期)。
+- 客户端只需内置**公钥**,绝不需要、也不应内置 Admin Key。
+
+## 1. 服务与公钥
+
+| 项 | 值 |
+| --- | --- |
+| Base URL | https://<部署域名>（由部署方填写） |
+| 签名算法 | EdDSA（Ed25519） |
+| 公钥 base64 | {{PUBKEY_B64}} |
+| 公钥 hex | {{PUBKEY_HEX}} |
+| access JWT 有效期 | {{ACCESS_TTL}}（离线宽限上限） |
+| refresh token 有效期 | {{REFRESH_TTL}} |
+
+access JWT 主要 claim:
+
+~~~json
+{
+  "iss": "license-server",
+  "typ": "access",
+  "sub": "<license_id>",
+  "mhash": "<machine_hash>",
+  "lic_exp": 1782000000,
+  "features": { "pro": true },
+  "iat": 1759900000,
+  "exp": 1759986400,
+  "jti": "随机 id"
+}
+~~~
+
+features 是服务端在签发 license 时设定的任意 JSON,客户端读取它做功能开关与配额。
+
+## 2. 客户端 API
+
+### POST /v1/activate
+首次激活:用 license_key 绑定一台设备,返回 access + refresh。
+
+请求体:
+
+~~~json
+{
+  "license_key": "LIC-....",
+  "machine_hash": "设备稳定标识的 SHA256 hex",
+  "timestamp": 1759900000,
+  "nonce": "随机串 8~128 位,仅限 A-Za-z0-9-_"
+}
+~~~
+
+响应 200:
+
+~~~json
+{
+  "access_token": "eyJ...",
+  "refresh_token": "eyJ...",
+  "expires_in": 86400,
+  "access_expires_at": 1759986400,
+  "refresh_expires_at": 1762498400,
+  "license_expires_at": 1782000000,
+  "features": { "pro": true },
+  "license_id": "十六进制 id"
+}
+~~~
+
+### POST /v1/refresh
+access 过期前调用,换取新 access(并轮换 refresh,务必覆盖保存)。
+
+请求体:
+
+~~~json
+{ "refresh_token": "eyJ...", "timestamp": 1759900000, "nonce": "随机串" }
+~~~
+
+响应字段同 activate。
+
+### GET /v1/status
+两种用法:
+- 推荐:请求头 Authorization: Bearer <access_token> -> 返回 token / license 到期信息(不暴露 license_key)。
+- 或:?license_key=...&machine_hash=... -> 返回台账摘要(只读,无需 nonce)。
+
+### GET /v1/pubkey
+返回 { "alg": "EdDSA", "pubkey_b64": "...", "pubkey_hex": "..." }。
+
+### GET /healthz
+健康检查,返回 { "status": "ok" }。
+
+## 3. 防重放(activate 与 refresh 必做)
+
+- timestamp:Unix 秒,与服务器时间差必须 ≤ 5 分钟(客户端需校时 / 使用服务器时间)。
+- nonce:每次请求全新,8~128 位 [A-Za-z0-9-_];服务端内存去重,复用返回 409。
+
+## 4. machine_hash 生成
+
+取设备稳定标识(主板序列号 / 磁盘序列号 / 机器 GUID 等)拼接后做 SHA256,输出小写 hex。
+要求同一设备跨重启、重装保持稳定。同一 machine_hash 重复激活是幂等的,不占新席位。
+
+## 5. 客户端状态机(推荐实现)
+
+~~~python
+def get_access():
+    toks = load()
+    if not toks:
+        return activate()                      # 首次运行
+    if access_valid_locally(toks.access):      # 用公钥验签并检查 exp
+        if expiring_soon(toks.access):         # 例如剩余 < 6h
+            try: refresh(toks.refresh)         # 后台续期
+            except NetworkError: pass          # 断网:凭旧 access 撑到 exp
+        return toks.access
+    refresh(toks.refresh)                      # access 已过期:必须在线刷新
+    return load().access
+~~~
+
+要点:
+
+- refresh 返回 401/403 = license 层失效(被吊销 / 过期 / 超席位 / 被踢),应提示用户续费;网络异常则继续用旧 access 直到 exp。
+- 每次 refresh 都会返回新的 refresh_token,必须覆盖保存。
+- 公钥随客户端版本发布;服务端轮换密钥时需同步发布新版客户端。
+
+## 6. 错误码
+
+| 状态码 | 含义 |
+| --- | --- |
+| 400 | 参数错误 / timestamp 超窗 / nonce 格式非法 |
+| 401 | Admin Key 或 token 无效 |
+| 403 | 已吊销 / 已过期 / 席位已满 / 设备已解绑 |
+| 409 | nonce 重放 |
+
+## 7. 管理 API(仅后台运维,严禁打包进客户端)
+
+一律使用请求头 Authorization: Bearer <ADMIN_KEY>。
+
+| 方法 路径 | 说明 |
+| --- | --- |
+| POST /admin/licenses | 签发,body {"customer","days","seats","features"} |
+| GET /admin/licenses | 分页台账,query q/status/page/page_size/sort/order |
+| GET /admin/stats | 汇总统计 |
+| GET /admin/licenses/{id} | 单个 license + 设备列表 |
+| POST /admin/licenses/{id}/revoke | 吊销 |
+| POST /admin/licenses/{id}/restore | 恢复 |
+| POST /admin/licenses/{id}/extend | 续期,body {"add_days":30} |
+| POST /admin/licenses/{id}/update | 修改客户名/席位,body {"customer","seats"} 可只传其一 |
+| POST /admin/licenses/{id}/features | 修改功能标记,body {"features":{...}} |
+| DELETE /admin/licenses/{id} | 彻底删除(含设备记录) |
+| DELETE /admin/licenses/{id}/machines | 解绑全部设备,释放席位 |
+| DELETE /admin/licenses/{id}/machines/{mhash} | 踢单台设备,释放席位 |
+
+## 8. 安全
+
+- 生产务必全程 TLS。
+- 服务端只存 license_key 的 SHA256;私钥泄露需轮换并重新发布客户端公钥。
+- 本系统不做防共享;强绑定场景请用小席位数 + 短 access TTL + 硬件指纹。
+`

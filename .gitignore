@@ -1,0 +1,6 @@
+license-server.exe
+licenses.db*
+*.key
+*.db-journal
+*.db-wal
+*.db-shm
