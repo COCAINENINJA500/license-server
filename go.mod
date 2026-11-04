@@ -1,9 +1,10 @@
-module license-server
+module github.com/COCAINENINJA500/ed25519-license-server
 
 go 1.26.4
 
 require (
 	github.com/golang-jwt/jwt/v5 v5.3.1
+	golang.org/x/time v0.14.0
 	modernc.org/sqlite v1.60.1
 )
 

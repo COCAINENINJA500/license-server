@@ -1,7 +1,11 @@
 # 轻量云端 License 鉴权系统
 
+[![CI](https://github.com/COCAINENINJA500/ed25519-license-server/actions/workflows/ci.yml/badge.svg)](https://github.com/COCAINENINJA500/ed25519-license-server/actions/workflows/ci.yml)
+[![License](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](LICENSE)
+![Go](https://img.shields.io/badge/Go-1.26-00ADD8?logo=go&logoColor=white)
+
 单二进制、无 CGO、零外部服务依赖：SQLite 本地文件即数据库，开箱即用。
-给自己的软件加一个“受控分发”能力：签发 license → 客户端激活绑定设备 → 靠短期 access JWT + 后台 refresh 续期，吊销/过期/超席位全部卡在 refresh。
+给自己的软件加一个”受控分发”能力：签发 license → 客户端激活绑定设备 → 靠短期 access JWT + 后台 refresh 续期，吊销/过期/超席位全部卡在 refresh。
 
 ## 对原需求的取舍说明
 
@@ -15,22 +19,37 @@
 
 不做的：账号体系、支付、多租户 UI。
 
+## 安全与健壮性设计
+
+- **refresh 轮换 + 重用检测**：每次 refresh 轮换 refresh token，库中记录当前 `jti`；被轮换的旧 token 再次出现即 `401` 立即作废（防盗用，见 `activations.current_refresh_jti`）。
+- **每 IP 限流**：`/v1/*` token bucket（默认 1 rps / burst 10，`--rate-rps/--rate-burst` 可调，`--rate-rps 0` 关闭），反代场景自动读取 `X-Forwarded-For`。
+- **请求体上限**：统一 1 MiB，超限 `413`。
+- **优雅停机**：SIGINT/SIGTERM 后 10s 排水在途请求；`http.Server` 全套超时（Slowloris 防护）。
+- **防重放**：activate/refresh 强制 `timestamp`（±5 分钟）+ `nonce`（双代内存去重，O(1) 清理）。
+- **panic 隔离**：单个请求 panic 不击穿进程，统一转 500 并记录堆栈。
+
 ## 目录结构
 
 ```
 .
-├── main.go        # 服务端全部 API 逻辑（单文件）
-├── admin.go       # 内嵌单租户管理台（单文件 HTML，无外部依赖，随二进制发布）
-├── main_test.go   # 核心单测：签发/激活/超席位/吊销后refresh/过期后refresh/重放/踢设备/管理台
-├── go.mod
-└── README.md
+├── cmd/license-server/     # 入口：flag 解析、依赖装配、http.Server、优雅停机
+├── internal/
+│   ├── config/             # 配置（flag 与环境变量等价，flag 优先）
+│   ├── store/              # SQLite 持久层：建表/迁移 + 全部查询（ctx 透传）
+│   ├── licensing/          # Ed25519 密钥、JWT 签发/校验、防重放 nonce
+│   ├── api/                # 客户端 + 管理 API、中间件（日志/限流/CORS/体积上限/recover）
+│   └── adminui/            # go:embed 内嵌管理台 HTML 与对接文档模板
+├── .github/workflows/ci.yml
+├── Dockerfile
+├── Makefile
+└── main→cmd 单测试覆盖见 internal/api/server_test.go
 ```
 
 ## 快速开始
 
 ```bash
-# 构建（单二进制，约 16MB）
-go build -o license-server .
+# 构建（单二进制，约 16MB；version 注入 git describe）
+make build   # 或: CGO_ENABLED=0 go build -trimpath -ldflags "-s -w -X main.version=$(git describe --always)" -o license-server ./cmd/license-server
 
 # 启动（首次自动生成 admin key + Ed25519 签名密钥并打印）
 ./license-server --addr :8080 --db licenses.db
@@ -38,6 +57,14 @@ go build -o license-server .
 # 生产建议用环境变量固定密钥
 LICENSE_ADMIN_KEY=<强随机串> ./license-server --addr :8080 --db /data/licenses.db \
   --tls-cert /etc/ssl/server.crt --tls-key /etc/ssl/server.key
+```
+
+Docker（静态编译 + distroless 非 root 镜像）：
+
+```bash
+docker build -t ed25519-license-server .
+docker run -d -p 8080:8080 -v license-data:/data ed25519-license-server
+curl http://127.0.0.1:8080/healthz   # {"status":"ok","version":"..."}
 ```
 
 常用配置（flag 与环境变量等价，flag 优先）：
@@ -234,23 +261,30 @@ def get_valid_access():
 ```sql
 licenses(id, key_hash UNIQUE, customer, seats, expires_at, features, status, created_at)
 -- key_hash = SHA256 hex(license_key)，库里永远没有明文 key
-activations(license_id, machine_hash, first_seen, last_seen, PRIMARY KEY(license_id, machine_hash))
+activations(license_id, machine_hash, first_seen, last_seen, current_refresh_jti, PRIMARY KEY(license_id, machine_hash))
 ```
 
 - refresh token 为自包含 JWT（`typ=refresh`，内含 license_id + machine_hash），无需落库，所以两张表足够。
 - 席位语义：`activations` 行数 ≤ `seats`；同机重复激活幂等（更新 `last_seen`，不占新席位）。
+- `current_refresh_jti` 记录每台设备当前有效的 refresh token；轮换出的旧 token 重用即 401。
 
 ## 安全说明
 
 - 全程 TLS：直连用 `--tls-cert/--tls-key`，或放 Caddy/Nginx 后面；`GET /v1/status?license_key=` 会进访问日志，敏感环境请用 Bearer 模式。
-- 防重放：activate/refresh 强制 `timestamp`（±5min，客户端请做 NTP/校时）+ `nonce`（服务端内存去重 10min，复用返回 409）。
-- 服务端只存 key 的 SHA256；签名密钥（Ed25519）文件权限 0600，泄露需轮换并重新签发客户端公钥。
+- 防重放：activate/refresh 强制 `timestamp`（±5min，客户端请做 NTP/校时）+ `nonce`（服务端双代内存去重 10min，复用返回 409）。多实例部署需把 nonce 去重外置（如 Redis），单实例默认内存即可。
+- refresh 轮换重用检测：旧 refresh 再次出现立即 401；`401`（重用/无效）与 `403`（吊销/过期/超席位/被踢）语义不同，客户端据此区分处理。
+- 服务端只存 key 的 SHA256；签名密钥（Ed25519）文件权限 0600 且不入库（.gitignore），泄露需轮换并重新签发客户端公钥。
 - 本系统不做防共享（同一 key 多人共用同一 machine_hash 无法识别），强绑定场景请结合硬件指纹 + 小席位数 + 短 access-ttl。
 
 ## 测试
 
 ```bash
-go test ./... -v -count=1
+go test -race ./...
+# 或 make test
 ```
 
-覆盖：签发→激活→JWT 可验、超席位 403、同机幂等、吊销后 refresh/激活 403、过期后 refresh 403（续期后恢复）、nonce 重放 409、时间窗外 400、管理鉴权 401、踢设备后 refresh 403、管理台页面 200 + 列表接口。
+覆盖：签发→激活→JWT 可验、超席位 403、同机幂等、吊销后 refresh/激活 403、过期后 refresh 403（续期后恢复）、**轮换重用 401**、nonce 重放 409、时间窗外 400、**限流 429**、**请求体超限 413**、管理鉴权 401、踢设备后 refresh 403、管理台页面 200 + 列表接口、对接文档内嵌真实公钥、密钥文件生成/加载、nonce 双代清理。
+
+## License
+
+[Apache-2.0](LICENSE) © 2026 n0way10se
