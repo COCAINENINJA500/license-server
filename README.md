@@ -46,8 +46,8 @@ Ed25519 签名 access JWT · 设备绑定席位 · refresh 轮换重用检测 ·
 | ![登录](docs/screenshots/login.png) | ![Dashboard](docs/screenshots/dashboard.png) |
 | **授权管理** | **签发 License** |
 | ![授权管理](docs/screenshots/licenses.png) | ![签发](docs/screenshots/issue.png) |
-| **产品目录** | |
-| ![产品](docs/screenshots/products.png) | |
+| **产品目录** | **接入指南** |
+| ![产品](docs/screenshots/products.png) | ![接入指南](docs/screenshots/docs.png) |
 
 ## 🚀 快速开始
 
