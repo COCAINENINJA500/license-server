@@ -7,9 +7,8 @@ linters:
     - revive
     - staticcheck
     - unused
-
-linters-settings:
-  revive:
-    rules:
-      - name: exported
-        disabled: true # 中文注释项目,导出符号注释规范按项目习惯
+  settings:
+    revive:
+      rules:
+        - name: exported
+          disabled: true # 中文注释项目,导出符号注释规范按项目习惯
