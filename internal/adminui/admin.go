@@ -63,7 +63,13 @@ const promptHead = `# 为当前项目实现 License 客户端授权模块
 ---
 `
 
-// IntegrationPrompt 生成可直接复制给 Coding Agent 的完整提示词(任务要求 + 对接文档全文).
-func IntegrationPrompt(pub ed25519.PublicKey, accessTTL, refreshTTL time.Duration) string {
-	return promptHead + IntegrationMarkdown(pub, accessTTL, refreshTTL)
+// IntegrationPrompt 生成可直接复制给 Coding Agent 的完整提示词(任务要点 + 对接文档全文).
+// productName/productFeatures 非空时,注入"指定产品的功能标记"一节,Agent 按该产品实现开关.
+func IntegrationPrompt(pub ed25519.PublicKey, accessTTL, refreshTTL time.Duration, productName, productFeatures string) string {
+	out := promptHead
+	if productName != "" {
+		out += "## 指定产品的功能标记\n\n产品: " + productName + "\n\n```json\n" + productFeatures + "\n```\n\n客户端的功能开关语义以上述标记为准;未涉及的开关一律不要臆造。\n\n---\n\n"
+	}
+	out += IntegrationMarkdown(pub, accessTTL, refreshTTL)
+	return out
 }

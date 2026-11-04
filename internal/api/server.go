@@ -71,6 +71,7 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("POST /admin/licenses", s.requireAdmin(s.handleIssue))
 	mux.HandleFunc("GET /admin/licenses", s.requireAdmin(s.handleList))
 	mux.HandleFunc("GET /admin/stats", s.requireAdmin(s.handleStats))
+	mux.HandleFunc("GET /admin/insights", s.requireAdmin(s.handleInsights))
 
 	// 产品目录: 签发 license 时按产品带入默认 features / 天数 / 席位.
 	mux.HandleFunc("POST /admin/products", s.requireAdmin(s.handleProductCreate))

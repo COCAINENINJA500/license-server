@@ -101,10 +101,10 @@ curl http://127.0.0.1:8080/healthz
 
 内嵌多页面 SPA（hash 路由，黑白中性色 + 深色模式）：
 
-- **概览**：统计卡（总数 / 有效 / 即将到期 / 已过期 / 已吊销 / 席位占用）+ 最近签发
+- **概览（Dashboard）**：统计卡 + 近 30 天签发趋势 + 产品分布 + 即将到期列表
 - **台账**：服务端分页表格（搜索、状态筛选、列排序、每页条数），整行点击进详情
 - **产品**：维护产品模板（功能标记 + 默认天数 / 席位），签发时选择产品自动带入
-- **接入指南**：一键**复制 AI 对接提示词**（内嵌本实例真实公钥，粘贴给任意 Coding Agent 即可开工）、下载 Markdown 文档、公钥展示、features 说明
+- **接入指南**：选择产品后一键**复制 AI 对接提示词**（内嵌真实公钥与该产品的功能标记，粘贴给任意 Coding Agent 即可开工）、下载 Markdown 文档、公钥展示
 
 操作涵盖：签发（`license_key` 明文只显示一次）、详情（设备列表）、续期、编辑功能标记、吊销 / 恢复、踢设备、彻底删除。
 
@@ -117,6 +117,7 @@ curl http://127.0.0.1:8080/healthz
 | `POST` | `/admin/licenses` | 签发，body `{"customer","product_id"?,"days"?,"seats"?,"features"?}`——带 `product_id` 时未提供的字段自动取产品默认值；`license_key` 明文仅返回一次 |
 | `GET` | `/admin/licenses` | 分页列表，query `q`（客户/ID 模糊）、`status`（`all`/`active`/`expiring`/`expired`/`revoked`）、`page`、`page_size`(≤100)、`sort`、`order` |
 | `GET` | `/admin/stats` | 汇总统计 |
+| `GET` | `/admin/insights` | 数据洞察：近 30 天签发趋势 / 产品分布 / 即将到期列表 |
 | `GET` | `/admin/licenses/{id}` | 查询单个 + 设备列表 |
 | `POST` | `/admin/licenses/{id}/revoke` | 吊销（保留台账） |
 | `POST` | `/admin/licenses/{id}/restore` | 恢复已吊销 |

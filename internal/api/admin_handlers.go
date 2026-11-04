@@ -35,10 +35,48 @@ func (s *Server) handleIntegrationDoc(w http.ResponseWriter, r *http.Request) {
 
 // GET /admin/integration-prompt.txt 实时生成"AI 一键对接提示词":
 // 任务要求 + 对接文档全文(内嵌真实公钥),复制给任意 Coding Agent 即可开工.
+// 可选 ?product_id= 指定产品: 提示词中注入该产品的功能标记.
 func (s *Server) handleIntegrationPrompt(w http.ResponseWriter, r *http.Request) {
-	prompt := adminui.IntegrationPrompt(s.Signer.Pubkey(), s.Signer.AccessTTL, s.Signer.RefreshTTL)
+	name, feat := "", ""
+	if pid := r.URL.Query().Get("product_id"); pid != "" {
+		p, err := s.Store.GetProductByID(r.Context(), pid)
+		if err != nil {
+			writeInternal(w, err)
+			return
+		}
+		if p == nil {
+			writeErr(w, badRequest("product 不存在"))
+			return
+		}
+		name, feat = p.Name, p.Features
+	}
+	prompt := adminui.IntegrationPrompt(s.Signer.Pubkey(), s.Signer.AccessTTL, s.Signer.RefreshTTL, name, feat)
 	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
 	_, _ = w.Write([]byte(prompt))
+}
+
+// GET /admin/insights Dashboard 数据洞察: 近 30 天签发趋势 / 产品分布 / 即将到期.
+func (s *Server) handleInsights(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	now := s.nowTime().Unix()
+	trend, err := s.Store.IssueTrend(ctx, 30)
+	if err != nil {
+		writeInternal(w, err)
+		return
+	}
+	byProduct, err := s.Store.LicensesByProduct(ctx)
+	if err != nil {
+		writeInternal(w, err)
+		return
+	}
+	expiring, err := s.Store.ExpiringSoon(ctx, now, 10)
+	if err != nil {
+		writeInternal(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"trend": trend, "by_product": byProduct, "expiring": expiring,
+	})
 }
 
 type issueReq struct {
@@ -65,6 +103,7 @@ func (s *Server) handleIssue(w http.ResponseWriter, r *http.Request) {
 	}
 	ctx := r.Context()
 	var product *store.ProductRow
+	var productName string
 	if req.ProductID != "" {
 		p, err := s.Store.GetProductByID(ctx, req.ProductID)
 		if err != nil {
@@ -76,6 +115,7 @@ func (s *Server) handleIssue(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		product = p
+		productName = p.Name
 	}
 	days := 0
 	if req.Days != nil {
@@ -125,14 +165,16 @@ func (s *Server) handleIssue(w http.ResponseWriter, r *http.Request) {
 		}
 		key := "LIC-" + hex.EncodeToString(keyBytes)
 		l := &store.LicenseRow{
-			ID:        id,
-			KeyHash:   sha256Hex(key),
-			Customer:  req.Customer,
-			Seats:     seats,
-			ExpiresAt: nowUnix + int64(days)*86400,
-			Features:  features,
-			Status:    "active",
-			CreatedAt: nowUnix,
+			ID:          id,
+			KeyHash:     sha256Hex(key),
+			Customer:    req.Customer,
+			Seats:       seats,
+			ExpiresAt:   nowUnix + int64(days)*86400,
+			Features:    features,
+			Status:      "active",
+			CreatedAt:   nowUnix,
+			ProductID:   req.ProductID,
+			ProductName: productName,
 		}
 		if err := s.Store.CreateLicense(ctx, l); err != nil {
 			if strings.Contains(err.Error(), "UNIQUE") {

@@ -179,6 +179,22 @@ code{background:var(--muted);border:1px solid var(--border);border-radius:5px;pa
   .wrap{padding:20px 14px 60px}
   .detail-grid{grid-template-columns:100px 1fr}
 }
+/* ---- dashboard 洞察 ---- */
+.trend{display:flex;align-items:flex-end;gap:3px;height:130px}
+.trend .tcol{flex:1;display:flex;flex-direction:column;justify-content:flex-end;align-items:center;gap:4px;height:100%;min-width:0}
+.trend .tcol i{display:block;width:100%;max-width:26px;background:var(--foreground);border-radius:3px 3px 0 0;opacity:.85}
+.trend .tcol .tv{font-size:10.5px;color:var(--foreground);font-variant-numeric:tabular-nums}
+.trend .tcol .td{font-size:9.5px;color:var(--muted-foreground);white-space:nowrap}
+.bars .brow{display:flex;align-items:center;gap:10px;margin:9px 0}
+.bars .bname{flex:0 0 150px;font-size:12.5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;text-align:right}
+.bars .btrack{flex:1;height:10px;background:var(--muted);border-radius:999px;overflow:hidden}
+.bars .btrack i{display:block;height:100%;background:var(--foreground);border-radius:999px}
+.bars .bval{flex:0 0 28px;font-size:12px;color:var(--muted-foreground);font-variant-numeric:tabular-nums}
+/* ---- 功能标记 kv 编辑器 ---- */
+.kv-row{display:flex;gap:8px;align-items:center;margin-bottom:8px}
+.kv-row .kv-key{flex:0 0 40%;border:1px solid var(--border);background:var(--background);color:var(--foreground);border-radius:var(--radius);padding:9px 11px;font-size:13px}
+.kv-row .kv-val{flex:1;border:1px solid var(--border);background:var(--background);color:var(--foreground);border-radius:var(--radius);padding:9px 11px;font-size:13px;font-family:var(--mono)}
+#kv-prod,#kv-issue{margin-bottom:10px}
 </style>
 </head>
 <body>
@@ -200,7 +216,7 @@ code{background:var(--muted);border:1px solid var(--border);border-radius:5px;pa
 <div class="brand"><span class="logo"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="7.5" cy="15.5" r="3.5"/><path d="M10.2 12.8 20.5 2.5"/><path d="M16.5 6.5 19 9"/></svg></span><span>License 管理台</span></div>
 <nav class="tabs">
 <a href="#/dashboard" data-route="dashboard">概览</a>
-<a href="#/licenses" data-route="licenses">台账</a>
+<a href="#/licenses" data-route="licenses">授权</a>
 <a href="#/products" data-route="products">产品</a>
 <a href="#/docs" data-route="docs">接入指南</a>
 </nav>
@@ -250,6 +266,41 @@ function copy(text,label){
   else { fallbackCopy(text); done(); }
 }
 function fallbackCopy(text){ var t=document.createElement('textarea'); t.value=text; t.style.position='fixed'; t.style.opacity='0'; document.body.appendChild(t); t.select(); try{ document.execCommand('copy'); }catch(e){} t.remove(); }
+
+/* ---------- 功能标记 kv 编辑器: GUI 填字段,免手写 JSON ---------- */
+function kvRowHTML(scope,k,v){
+  return '<div class="kv-row">'+
+    '<input class="kv-key" placeholder="字段名,如 pro" value="'+esc(k)+'">'+
+    '<input class="kv-val" placeholder="值: true / false / 数字 / 文本" value="'+esc(v==null?'':String(v))+'">'+
+    '<button type="button" class="icon-btn" onclick="removeKvRow(this)" aria-label="删除字段"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M18 6 6 18M6 6l12 12"/></svg></button></div>';
+}
+function kvRowsInner(scope,obj){
+  obj=obj||{};
+  var keys=Object.keys(obj);
+  return keys.map(function(k){ return kvRowHTML(scope,k,obj[k]); }).join('');
+}
+function kvEditorHTML(scope,obj){
+  return '<div id="kv-'+scope+'">'+kvRowsInner(scope,obj)+'</div>'+
+    '<button type="button" class="btn btn-outline btn-sm" onclick="addKvRow(\''+scope+'\')">+ 添加字段</button>';
+}
+function addKvRow(scope){ $id('kv-'+scope).insertAdjacentHTML('beforeend', kvRowHTML(scope,'','')); }
+function removeKvRow(btn){ var row=btn.closest('.kv-row'); if(row) row.remove(); }
+/* 值解析: true/false → 布尔,纯数字 → 数值,其余保持字符串. 字段名为空视为无效 */
+function collectKv(scope){
+  var out={}, ok=true;
+  var box=$id('kv-'+scope); if(!box) return {};
+  box.querySelectorAll('.kv-row').forEach(function(row){
+    var k=row.querySelector('.kv-key').value.trim();
+    var v=row.querySelector('.kv-val').value;
+    if(k===''){ ok=false; return; }
+    var t=v.trim();
+    if(t==='true') out[k]=true;
+    else if(t==='false') out[k]=false;
+    else if(t!=='' && !isNaN(Number(t))) out[k]=Number(t);
+    else out[k]=v;
+  });
+  return ok?out:null;
+}
 
 /* ---------- 鉴权与请求 ---------- */
 function setAuthed(on){ $id('loginView').style.display=on?'none':'flex'; $id('appView').style.display=on?'block':'none'; }
@@ -326,19 +377,22 @@ function navigate(){
   document.querySelectorAll('.tabs a').forEach(function(a){ a.classList.toggle('active', a.getAttribute('data-route')===h); });
   if(h==='licenses'){ renderLicensesPage(); loadLicenses(); }
   else if(h==='products'){ renderProductsPage(); loadProducts(); }
-  else if(h==='docs'){ renderDocsPage(); loadPubkey(); }
-  else { renderDashboardPage(); loadStats(); loadRecent(); }
+  else if(h==='docs'){ renderDocsPage(); loadPubkey(); refreshDocProductSelect(); }
+  else { renderDashboardPage(); loadStats(); loadInsights(); }
 }
 window.addEventListener('hashchange', navigate);
 
-/* ---------- 概览页 ---------- */
+/* ---------- 概览页 (Dashboard) ---------- */
 function renderDashboardPage(){
   $id('page').innerHTML=
-    '<div class="page-head"><h1>概览</h1><p>License 总览与最近签发记录</p></div>'+
+    '<div class="page-head"><h1>概览</h1><p>授权资产全景与数据洞察</p></div>'+
     '<section class="stats" id="stats"></section>'+
-    '<section class="card"><div class="card-head"><h2>最近签发</h2><span class="spacer"></span><button class="btn btn-outline btn-sm" onclick="openIssue()">签发 License</button></div>'+
-    '<div class="table-wrap"><table><thead><tr><th>客户</th><th>License ID</th><th>席位</th><th>到期</th><th>状态</th><th></th></tr></thead>'+
-    '<tbody id="recent"><tr><td colspan="6" class="empty">加载中…</td></tr></tbody></table></div></section>';
+    '<section class="card"><div class="card-head"><h2>近 30 天签发趋势</h2><span class="spacer"></span><button class="btn btn-outline btn-sm" onclick="openIssue()">签发 License</button></div>'+
+      '<div id="trendBox"><div class="empty">加载中…</div></div></section>'+
+    '<section class="card"><div class="card-head"><h2>产品分布</h2><span class="hint">按授权数量</span></div>'+
+      '<div id="byProductBox"><div class="empty">加载中…</div></div></section>'+
+    '<section class="card"><div class="card-head"><h2>即将到期（7 天内）</h2><span class="hint">点击行进入详情续期</span></div>'+
+      '<div id="expiringBox"><div class="empty">加载中…</div></div></section>';
 }
 async function loadStats(){ try{ renderStats(await api('/admin/stats')); }catch(e){} }
 function renderStats(d){
@@ -353,27 +407,57 @@ function renderStats(d){
   var el=$id('stats'); if(!el) return;
   el.innerHTML=cards.map(function(c){ return '<div class="stat"><div class="stat-v">'+esc(String(c.v))+'</div><div class="stat-k">'+esc(c.k)+'</div></div>'; }).join('');
 }
-async function loadRecent(){
+async function loadInsights(){
   try{
-    var d=await api('/admin/licenses?page=1&page_size=8&sort=created_at&order=desc&status=all&q=');
-    var tb=$id('recent'); if(!tb) return;
-    var list=d.licenses||[];
-    tb.innerHTML=list.length?list.map(function(l){ return licenseRowHTML(l,true); }).join(''):'<tr><td colspan="6" class="empty">暂无数据</td></tr>';
-  }catch(e){}
+    var d=await api('/admin/insights');
+    renderTrend(d.trend); renderByProduct(d.by_product); renderExpiring(d.expiring);
+  }catch(e){ if(state.key) toast('洞察加载失败：'+e.message,'err'); }
+}
+function renderTrend(trend){
+  var el=$id('trendBox'); if(!el) return;
+  trend=trend||[];
+  if(!trend.length){ el.innerHTML='<div class="empty">近 30 天暂无签发记录,签发后这里会长出趋势图</div>'; return; }
+  var max=0; trend.forEach(function(p){ if(p.count>max) max=p.count; });
+  el.innerHTML='<div class="trend">'+trend.map(function(p,i){
+    var h=max?Math.round(p.count/max*100):2;
+    var label=(i%5===0||i===trend.length-1)?'<span class="td">'+esc(p.day.slice(5))+'</span>':'<span class="td">&nbsp;</span>';
+    return '<div class="tcol" title="'+esc(p.day)+': '+p.count+' 条"><span class="tv">'+p.count+'</span><i style="height:'+h+'%"></i>'+label+'</div>';
+  }).join('')+'</div>';
+}
+function renderByProduct(list){
+  var el=$id('byProductBox'); if(!el) return;
+  list=list||[];
+  if(!list.length){ el.innerHTML='<div class="empty">暂无数据</div>'; return; }
+  var max=0; list.forEach(function(p){ if(p.count>max) max=p.count; });
+  el.innerHTML='<div class="bars">'+list.map(function(p){
+    var w=max?Math.round(p.count/max*100):0;
+    return '<div class="brow"><div class="bname" title="'+esc(p.name)+'">'+esc(p.name)+'</div><div class="btrack"><i style="width:'+w+'%"></i></div><div class="bval">'+p.count+'</div></div>';
+  }).join('')+'</div>';
+}
+function renderExpiring(list){
+  var el=$id('expiringBox'); if(!el) return;
+  list=list||[];
+  if(!list.length){ el.innerHTML='<div class="empty">7 天内没有到期授权 ✓</div>'; return; }
+  el.innerHTML='<div class="table-wrap"><table class="mini"><thead><tr><th>客户</th><th>产品</th><th>席位</th><th>到期</th></tr></thead><tbody>'+
+    list.map(function(l){
+      return '<tr data-id="'+esc(l.license_id)+'"><td>'+esc(l.customer)+'</td><td>'+(l.product_name?esc(l.product_name):'<span class="sub">—</span>')+'</td><td class="mono">'+(l.used||0)+' / '+l.seats+'</td><td class="sub">'+fmtDate(l.expires_at)+' · '+remain(l.expires_at)+'</td></tr>';
+    }).join('')+'</tbody></table></div>';
 }
 
 /* ---------- 下拉选择组件 ---------- */
 var ICON_CHECK='<svg class="check" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg>';
-function selectHTML(id,opts,val){
+function selectInner(opts,val){
   var label='';
   var menu=opts.map(function(o){
     if(o[0]===val) label=o[1];
     return '<button type="button" class="select-opt'+(o[0]===val?' active':'')+'" role="option" data-value="'+esc(o[0])+'" data-label="'+esc(o[1])+'">'+esc(o[1])+ICON_CHECK+'</button>';
   }).join('');
-  return '<div class="select" id="'+id+'">'+
-    '<button type="button" class="select-trigger" aria-haspopup="listbox" aria-expanded="false"><span class="select-value">'+esc(label)+'</span>'+
+  return '<button type="button" class="select-trigger" aria-haspopup="listbox" aria-expanded="false"><span class="select-value">'+esc(label)+'</span>'+
     '<svg class="chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></svg></button>'+
-    '<div class="select-menu" role="listbox">'+menu+'</div></div>';
+    '<div class="select-menu" role="listbox">'+menu+'</div>';
+}
+function selectHTML(id,opts,val){
+  return '<div class="select" id="'+id+'">'+selectInner(opts,val)+'</div>';
 }
 function toggleSelect(sel){
   var open=sel.classList.contains('open');
@@ -388,10 +472,10 @@ function closeAllSelects(){
 }
 document.addEventListener('click',function(e){ if(!e.target.closest('.select')) closeAllSelects(); });
 
-/* ---------- 台账页 ---------- */
+/* ---------- 授权页 ---------- */
 function renderLicensesPage(){
   $id('page').innerHTML=
-    '<div class="page-head"><h1>台账</h1><p>签发、检索、续期、吊销与删除</p></div>'+
+    '<div class="page-head"><h1>授权管理</h1><p>签发、检索、续期、吊销与删除</p></div>'+
     '<section class="card">'+
       '<div class="card-head"><h2>License 列表</h2><span id="count" class="hint mono"></span><span class="spacer"></span><button class="btn btn-sm" onclick="openIssue()">签发 License</button></div>'+
       '<div class="toolbar">'+
@@ -402,8 +486,8 @@ function renderLicensesPage(){
         '<span class="spacer"></span><button class="btn btn-outline btn-sm" onclick="loadLicenses()">刷新</button>'+
       '</div>'+
       '<div class="table-wrap"><table><thead><tr>'+
-        '<th data-sort="customer">客户</th><th data-sort="license_id">License ID</th><th data-sort="seats">席位</th><th data-sort="expires_at">到期</th><th data-sort="status">状态</th><th>操作</th>'+
-      '</tr></thead><tbody id="rows"><tr><td colspan="6" class="empty">加载中…</td></tr></tbody></table></div>'+
+        '<th data-sort="customer">客户</th><th data-sort="license_id">License ID</th><th>产品</th><th data-sort="seats">席位</th><th data-sort="expires_at">到期</th><th data-sort="status">状态</th><th>操作</th>'+
+      '</tr></thead><tbody id="rows"><tr><td colspan="7" class="empty">加载中…</td></tr></tbody></table></div>'+
       '<div class="pager" id="pager"></div>'+
     '</section>';
   $id('filter').value=state.q;
@@ -437,6 +521,7 @@ function licenseRowHTML(l,minimal){
   return '<tr data-id="'+esc(l.license_id)+'">'+
     '<td>'+esc(l.customer)+'</td>'+
     '<td><span class="mono id" title="'+esc(l.license_id)+'">'+esc(l.license_id)+'</span></td>'+
+    '<td>'+(l.product_name?esc(l.product_name):'<span class="sub">—</span>')+'</td>'+
     '<td><div class="seat'+(full?' full':'')+'"><span class="mono">'+(l.used||0)+' / '+l.seats+'</span><span class="bar"><i style="width:'+pct+'%"></i></span></div></td>'+
     '<td><div>'+fmtDate(l.expires_at)+'</div><div class="sub '+remainCls(l)+'">'+remain(l.expires_at)+'</div></td>'+
     '<td><span class="badge '+st+'"><span class="dot"></span>'+STATUS_LABEL[st]+'</span></td>'+
@@ -445,7 +530,7 @@ function licenseRowHTML(l,minimal){
 function fillLicenses(){
   $id('count').textContent='共 '+state.total+' 条';
   var tb=$id('rows');
-  if(!state.licenses.length){ tb.innerHTML='<tr><td colspan="6" class="empty">暂无数据</td></tr>'; buildPager(); return; }
+  if(!state.licenses.length){ tb.innerHTML='<tr><td colspan="7" class="empty">暂无数据</td></tr>'; buildPager(); return; }
   tb.innerHTML=state.licenses.map(function(l){ return licenseRowHTML(l,false); }).join('');
   buildPager();
 }
@@ -519,8 +604,9 @@ function productById(pid){ return state.products.filter(function(p){ return p.pr
 function openProductCreate(){
   openModal('<h3>新增产品</h3>'+
     '<label class="field">产品名称<input id="pName" placeholder="例如: NiumakejiAI Pro"></label>'+
-    '<label class="field" style="margin-top:12px">功能标记 (JSON)<textarea id="pFeatures" rows="4">{ "pro": true }</textarea></label>'+
-    '<div class="form-grid" style="margin-top:12px">'+
+    '<div class="modal-sub">功能标记（客户端读取的能力开关）</div>'+
+    kvEditorHTML('prod',{"pro":true})+
+    '<div class="form-grid" style="margin-top:14px">'+
     '<label class="field">默认有效天数<input id="pDays" type="number" value="365" min="1" max="3650"></label>'+
     '<label class="field">默认席位数<input id="pSeats" type="number" value="5" min="1" max="100000"></label></div>'+
     '<p class="hint" style="margin-top:8px">签发 license 时选择产品会自动带入这些默认值,仍可按单微调。</p>'+
@@ -529,11 +615,11 @@ function openProductCreate(){
 }
 function openProductEdit(pid){
   var p=productById(pid); if(!p) return;
-  var feat=typeof p.features==='string'?p.features:JSON.stringify(p.features,null,2);
   openModal('<h3>编辑产品</h3>'+
     '<label class="field">产品名称<input id="pName" value="'+esc(p.name)+'"></label>'+
-    '<label class="field" style="margin-top:12px">功能标记 (JSON)<textarea id="pFeatures" rows="4">'+esc(feat)+'</textarea></label>'+
-    '<div class="form-grid" style="margin-top:12px">'+
+    '<div class="modal-sub">功能标记（客户端读取的能力开关）</div>'+
+    kvEditorHTML('prod',p.features)+
+    '<div class="form-grid" style="margin-top:14px">'+
     '<label class="field">默认有效天数<input id="pDays" type="number" value="'+p.default_days+'" min="1" max="3650"></label>'+
     '<label class="field">默认席位数<input id="pSeats" type="number" value="'+p.default_seats+'" min="1" max="100000"></label></div>'+
     '<div class="modal-foot"><button class="btn btn-outline" onclick="closeModal()">取消</button>'+
@@ -541,9 +627,9 @@ function openProductEdit(pid){
 }
 async function saveProduct(pid){
   var name=$id('pName').value.trim();
-  var raw=$id('pFeatures').value.trim()||'{}';
+  var features=collectKv('prod');
+  if(features===null){ toast('功能标记字段名不能为空','err'); return; }
   var days=parseInt($id('pDays').value,10), seats=parseInt($id('pSeats').value,10);
-  var features; try{ features=JSON.parse(raw); }catch(e){ toast('功能标记不是合法 JSON','err'); return; }
   if(!name){ toast('产品名称必填','err'); return; }
   if(!days||days<1||days>3650){ toast('天数需为 1~3650','err'); return; }
   if(!seats||seats<1||seats>100000){ toast('席位需为 1~100000','err'); return; }
@@ -563,9 +649,10 @@ async function deleteProduct(pid){
 function renderDocsPage(){
   $id('page').innerHTML=
     '<div class="page-head"><h1>接入指南</h1><p>把 License 鉴权接入你的软件</p></div>'+
-    '<section class="card"><div class="card-head"><h2>AI 一键对接</h2><span class="hint">推荐:内嵌本实例真实公钥,粘贴给任意 Coding Agent 即可开工</span><span class="spacer"></span>'+
+    '<section class="card"><div class="card-head"><h2>AI 一键对接</h2><span class="spacer"></span>'+
+      selectHTML('docProduct',productOpts(),'')+
       '<button class="btn btn-sm" onclick="copyIntegrationPrompt(this)">复制 AI 对接提示词</button></div>'+
-      '<p class="doc-p">提示词 = 任务要求 + 完整对接文档(内嵌真实公钥与有效期参数)。复制后直接发给 Claude / Cursor / Codex 等任意 Coding Agent,它会按规范实现客户端:本地验签、激活、refresh 续期与轮换处理、错误语义、单元测试。</p></section>'+
+      '<p class="doc-p">提示词 = 任务要求 + 完整对接文档(内嵌真实公钥与有效期参数)。可先在右侧选择产品——提示词会附上该产品的功能标记,Coding Agent 会按这些开关实现客户端。支持 Claude / Cursor / Codex 等任意 Coding Agent。</p></section>'+
     '<section class="card"><div class="card-head"><h2>对接文档</h2><span class="hint">人工阅读 / 归档用</span><span class="spacer"></span>'+
       '<button class="btn btn-outline btn-sm" onclick="downloadIntegration()">下载 Markdown</button></div>'+
       '<p class="doc-p">完整 Markdown 对接文档:激活、本地验签、refresh 续期、防重放、错误码,以及管理 API 一览。</p></section>'+
@@ -611,13 +698,26 @@ async function downloadIntegration(){
 async function copyIntegrationPrompt(btn){
   var old=btn?btn.textContent:''; if(btn){ btn.disabled=true; btn.textContent='生成中…'; }
   try{
-    var r=await fetch('/admin/integration-prompt.txt',{ headers:{ 'Authorization':'Bearer '+state.key } });
+    var pid='';
+    var sel=$id('docProduct');
+    if(sel){ var act=sel.querySelector('.select-opt.active'); pid=act?act.getAttribute('data-value'):''; }
+    var url='/admin/integration-prompt.txt'+(pid?'?product_id='+encodeURIComponent(pid):'');
+    var r=await fetch(url,{ headers:{ 'Authorization':'Bearer '+state.key } });
     if(r.status===401){ setAuthed(false); state.key=''; try{localStorage.removeItem('lic_admin_key');}catch(e){} loginFail('登录已失效,请重新输入 Admin Key'); return; }
     if(!r.ok) throw new Error('HTTP '+r.status);
     var text=await r.text();
-    copy(text,'AI 对接提示词已复制,粘贴给任意 Coding Agent 即可开工');
+    copy(text, pid?'提示词已复制(含产品功能标记)':'AI 对接提示词已复制,粘贴给任意 Coding Agent 即可开工');
   }catch(e){ toast('复制失败：'+e.message,'err'); }
   if(btn){ btn.disabled=false; btn.textContent=old; }
+}
+function refreshDocProductSelect(){
+  var sel=$id('docProduct'); if(!sel) return;
+  api('/admin/products').then(function(d){
+    state.products=d.products||[];
+    var act=sel.querySelector('.select-opt.active');
+    var cur=act?act.getAttribute('data-value'):'';
+    sel.innerHTML=selectInner(productOpts(),cur);
+  })['catch'](function(){});
 }
 
 /* ---------- 页内事件委托 ---------- */
@@ -639,6 +739,7 @@ $id('page').addEventListener('click',function(e){
       closeAllSelects();
       if(sel.id==='statusFilter') onStatus(opt.getAttribute('data-value'));
       else if(sel.id==='pageSize') onPageSize(opt.getAttribute('data-value'));
+      else if(sel.id==='issueProduct') applyProduct();
       return;
     }
   }
@@ -670,43 +771,48 @@ $id('modalBody').addEventListener('click',function(e){
 });
 
 /* ---------- 签发 ---------- */
-function productOptions(){
-  var opts='<option value="">自定义(手动填写)</option>';
+function productOpts(){
+  var arr=[['','自定义(不关联产品)']];
   state.products.forEach(function(p){
-    opts+='<option value="'+esc(p.product_id)+'">'+esc(p.name)+' · 默认 '+p.default_days+' 天 / '+p.default_seats+' 席位</option>';
+    arr.push([p.product_id, p.name+' · 默认 '+p.default_days+' 天 / '+p.default_seats+' 席位']);
   });
-  return opts;
+  return arr;
+}
+function selectedProductID(){
+  var sel=$id('issueProduct'); if(!sel) return '';
+  var act=sel.querySelector('.select-opt.active');
+  return act?act.getAttribute('data-value'):'';
+}
+function applyProduct(){
+  var pid=selectedProductID(); if(!pid) return;
+  var p=productById(pid); if(!p) return;
+  $id('fDays').value=p.default_days; $id('fSeats').value=p.default_seats;
+  $id('kv-issue').innerHTML=kvRowsInner('issue',p.features);
 }
 function openIssue(){
   openModal('<h3>签发 License</h3>'+
     '<div class="form-grid"><label class="field">客户名<input id="fCustomer" placeholder="Acme"></label>'+
-    '<label class="field">产品<select id="fProduct" onchange="applyProduct()">'+productOptions()+'</select></label>'+
+    '<label class="field">产品<div class="select" id="issueProduct">'+selectInner(productOpts())+'</div></label>'+
     '<label class="field">有效天数<input id="fDays" type="number" value="365" min="1" max="3650"></label>'+
     '<label class="field">席位数<input id="fSeats" type="number" value="5" min="1" max="100000"></label></div>'+
-    '<label class="field" style="margin-top:12px">功能标记 (JSON,选产品自动带入,可微调)<textarea id="fFeatures" rows="3">{ "pro": true }</textarea></label>'+
+    '<div class="modal-sub">功能标记（选产品自动带入,可增删字段）</div>'+
+    kvEditorHTML('issue',{"pro":true})+
     '<p class="hint" style="margin-top:8px">功能标记会写入 access JWT,客户端验签后读取做功能开关 / 配额;产品只是默认模板,签发后可按单调整。</p>'+
     '<div class="modal-foot"><button class="btn btn-outline" onclick="closeModal()">取消</button><button class="btn" id="issueBtn" onclick="issue()">签发</button></div>');
-  // 打开时刷新一次产品列表(与 state 同步)
+  // 打开时刷新一次产品下拉
   api('/admin/products').then(function(d){
     state.products=d.products||[];
-    var sel=$id('fProduct'); if(!sel) return;
-    var cur=sel.value;
-    sel.innerHTML=productOptions(); sel.value=cur;
+    var sel=$id('issueProduct'); if(!sel) return;
+    sel.innerHTML=selectInner(productOpts(),'');
   })['catch'](function(){});
-}
-function applyProduct(){
-  var pid=$id('fProduct').value; if(!pid) return;
-  var p=productById(pid); if(!p) return;
-  $id('fDays').value=p.default_days; $id('fSeats').value=p.default_seats;
-  $id('fFeatures').value=featText(p.features);
 }
 async function issue(){
   var customer=$id('fCustomer').value.trim();
   var days=parseInt($id('fDays').value,10);
   var seats=parseInt($id('fSeats').value,10);
-  var pid=$id('fProduct') ? $id('fProduct').value : '';
-  var raw=$id('fFeatures').value.trim()||'{}';
-  var features; try{ features=JSON.parse(raw); }catch(e){ toast('功能标记不是合法 JSON','err'); return; }
+  var pid=selectedProductID();
+  var features=collectKv('issue');
+  if(features===null){ toast('功能标记字段名不能为空','err'); return; }
   var btn=$id('issueBtn'); btn.disabled=true;
   try{
     var body={ customer:customer, days:days, seats:seats, features:features };
@@ -743,6 +849,7 @@ async function showDetail(id){
       '<div class="detail-grid">'+
         kv('客户',esc(l.customer))+
         kv('License ID','<span class="mono">'+esc(l.license_id)+'</span><button class="btn btn-outline btn-sm" data-copy="'+esc(l.license_id)+'">复制</button>')+
+        kv('产品', l.product_name?esc(l.product_name):'<span class="sub">—</span>')+
         kv('状态','<span class="badge '+st+'"><span class="dot"></span>'+STATUS_LABEL[st]+'</span>')+
         kv('席位',(l.used||0)+' / '+l.seats)+
         kv('到期',fmtDate(l.expires_at)+' · '+remain(l.expires_at))+
@@ -801,7 +908,7 @@ async function saveFeatures(){
 function refreshCurrent(){
   if(state.route==='licenses') loadLicenses();
   else if(state.route==='products') loadProducts();
-  else if(state.route==='dashboard'){ loadStats(); loadRecent(); }
+  else if(state.route==='dashboard'){ loadStats(); loadInsights(); }
 }
 function refreshModal(id){ if($id('modalWrap').classList.contains('open') && state.detail && state.detail.license_id===id) showDetail(id); }
 async function revoke(id){

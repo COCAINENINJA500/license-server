@@ -8,20 +8,23 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+	"time"
 
 	_ "modernc.org/sqlite"
 )
 
 // LicenseRow licenses 表整行.
 type LicenseRow struct {
-	ID        string
-	KeyHash   string
-	Customer  string
-	Seats     int
-	ExpiresAt int64
-	Features  string
-	Status    string
-	CreatedAt int64
+	ID          string
+	KeyHash     string
+	Customer    string
+	Seats       int
+	ExpiresAt   int64
+	Features    string
+	Status      string
+	CreatedAt   int64
+	ProductID   string
+	ProductName string
 }
 
 // MachineView 单台激活设备视图.
@@ -31,16 +34,18 @@ type MachineView struct {
 	LastSeen    int64  `json:"last_seen"`
 }
 
-// LicenseView 管理 API 返回的台账视图(Used 为席位占用数).
+// LicenseView 管理 API 返回的授权视图(Used 为席位占用数).
 type LicenseView struct {
-	LicenseID string          `json:"license_id"`
-	Customer  string          `json:"customer"`
-	Seats     int             `json:"seats"`
-	Used      int             `json:"used"`
-	ExpiresAt int64           `json:"expires_at"`
-	Status    string          `json:"status"`
-	Features  json.RawMessage `json:"features"`
-	CreatedAt int64           `json:"created_at"`
+	LicenseID   string          `json:"license_id"`
+	Customer    string          `json:"customer"`
+	Seats       int             `json:"seats"`
+	Used        int             `json:"used"`
+	ExpiresAt   int64           `json:"expires_at"`
+	Status      string          `json:"status"`
+	Features    json.RawMessage `json:"features"`
+	CreatedAt   int64           `json:"created_at"`
+	ProductID   string          `json:"product_id"`
+	ProductName string          `json:"product_name"`
 }
 
 // Store SQLite 持久层句柄.
@@ -120,23 +125,29 @@ func initDB(db *sql.DB) error {
 	return migrate(db)
 }
 
-// migrate v1→v2:activations 增加 current_refresh_jti,用于 refresh 轮换重用检测.
-// 幂等:列已存在时忽略 duplicate column 错误.
+// migrate 幂等升级: v2 加 current_refresh_jti;v3 加 licenses.product_id/product_name(产品快照).
 func migrate(db *sql.DB) error {
-	if _, err := db.Exec(`ALTER TABLE activations ADD COLUMN current_refresh_jti TEXT NOT NULL DEFAULT ''`); err != nil {
-		// 列已存在则忽略,其余错误向上抛.
-		if !strings.Contains(err.Error(), "duplicate column") {
-			return err
+	stmts := []string{
+		`ALTER TABLE activations ADD COLUMN current_refresh_jti TEXT NOT NULL DEFAULT ''`,
+		`ALTER TABLE licenses ADD COLUMN product_id TEXT NOT NULL DEFAULT ''`,
+		`ALTER TABLE licenses ADD COLUMN product_name TEXT NOT NULL DEFAULT ''`,
+	}
+	for _, stmt := range stmts {
+		if _, err := db.Exec(stmt); err != nil {
+			// 列已存在则忽略,其余错误向上抛.
+			if !strings.Contains(err.Error(), "duplicate column") {
+				return err
+			}
 		}
 	}
 	return nil
 }
 
-const licenseCols = `id,key_hash,customer,seats,expires_at,features,status,created_at`
+const licenseCols = `id,key_hash,customer,seats,expires_at,features,status,created_at,product_id,product_name`
 
 func scanLicense(row interface{ Scan(...any) error }) (*LicenseRow, error) {
 	var l LicenseRow
-	err := row.Scan(&l.ID, &l.KeyHash, &l.Customer, &l.Seats, &l.ExpiresAt, &l.Features, &l.Status, &l.CreatedAt)
+	err := row.Scan(&l.ID, &l.KeyHash, &l.Customer, &l.Seats, &l.ExpiresAt, &l.Features, &l.Status, &l.CreatedAt, &l.ProductID, &l.ProductName)
 	if err == sql.ErrNoRows {
 		return nil, nil
 	}
@@ -161,8 +172,8 @@ func (s *Store) GetLicenseByID(ctx context.Context, id string) (*LicenseRow, err
 // CreateLicense 插入新 license(key_hash UNIQUE 冲突由调用方重试).
 func (s *Store) CreateLicense(ctx context.Context, l *LicenseRow) error {
 	_, err := s.db.ExecContext(ctx,
-		`INSERT INTO licenses(id,key_hash,customer,seats,expires_at,features,status,created_at) VALUES(?,?,?,?,?,?,?,?)`,
-		l.ID, l.KeyHash, l.Customer, l.Seats, l.ExpiresAt, l.Features, l.Status, l.CreatedAt)
+		`INSERT INTO licenses(id,key_hash,customer,seats,expires_at,features,status,created_at,product_id,product_name) VALUES(?,?,?,?,?,?,?,?,?,?)`,
+		l.ID, l.KeyHash, l.Customer, l.Seats, l.ExpiresAt, l.Features, l.Status, l.CreatedAt, l.ProductID, l.ProductName)
 	return err
 }
 
@@ -400,7 +411,7 @@ func (s *Store) ListPage(ctx context.Context, q, status string, page, pageSize i
 		dir = "DESC"
 	}
 	listArgs := append(append([]any{}, args...), pageSize, (page-1)*pageSize)
-	rows, err := s.db.QueryContext(ctx, `SELECT l.id,l.customer,l.seats,l.expires_at,l.features,l.status,l.created_at,
+	rows, err := s.db.QueryContext(ctx, `SELECT l.id,l.customer,l.seats,l.expires_at,l.features,l.status,l.created_at,l.product_id,l.product_name,
 		(SELECT COUNT(*) FROM activations a WHERE a.license_id=l.id)
 		FROM licenses l WHERE `+whereSQL+` ORDER BY `+SortColumn(sortKey)+` `+dir+` LIMIT ? OFFSET ?`, listArgs...)
 	if err != nil {
@@ -412,7 +423,7 @@ func (s *Store) ListPage(ctx context.Context, q, status string, page, pageSize i
 	for rows.Next() {
 		var l LicenseRow
 		var used int
-		if err := rows.Scan(&l.ID, &l.Customer, &l.Seats, &l.ExpiresAt, &l.Features, &l.Status, &l.CreatedAt, &used); err != nil {
+		if err := rows.Scan(&l.ID, &l.Customer, &l.Seats, &l.ExpiresAt, &l.Features, &l.Status, &l.CreatedAt, &l.ProductID, &l.ProductName, &used); err != nil {
 			return nil, 0, err
 		}
 		feat := l.Features
@@ -423,6 +434,7 @@ func (s *Store) ListPage(ctx context.Context, q, status string, page, pageSize i
 			LicenseID: l.ID, Customer: l.Customer, Seats: l.Seats, Used: used,
 			ExpiresAt: l.ExpiresAt, Status: l.Status,
 			Features: json.RawMessage(feat), CreatedAt: l.CreatedAt,
+			ProductID: l.ProductID, ProductName: l.ProductName,
 		})
 	}
 	if err := rows.Err(); err != nil {
@@ -431,7 +443,7 @@ func (s *Store) ListPage(ctx context.Context, q, status string, page, pageSize i
 	return out, total, nil
 }
 
-// ToView 单行转台账视图(含席位占用).
+// ToView 单行转授权视图(含席位占用).
 func (s *Store) ToView(ctx context.Context, l *LicenseRow) (*LicenseView, error) {
 	used, err := s.CountActivations(ctx, l.ID)
 	if err != nil {
@@ -445,7 +457,104 @@ func (s *Store) ToView(ctx context.Context, l *LicenseRow) (*LicenseView, error)
 		LicenseID: l.ID, Customer: l.Customer, Seats: l.Seats, Used: used,
 		ExpiresAt: l.ExpiresAt, Status: l.Status,
 		Features: json.RawMessage(feat), CreatedAt: l.CreatedAt,
+		ProductID: l.ProductID, ProductName: l.ProductName,
 	}, nil
+}
+
+// ---------------------------------------------------------------------------
+// 数据洞察(Dashboard): 签发趋势 / 产品分布 / 即将到期
+// ---------------------------------------------------------------------------
+
+// TrendPoint 单日签发数量.
+type TrendPoint struct {
+	Day   string `json:"day"` // YYYY-MM-DD
+	Count int    `json:"count"`
+}
+
+// IssueTrend 最近 days 天的每日签发数量(缺签发日不补零,由前端渲染).
+func (s *Store) IssueTrend(ctx context.Context, days int) ([]TrendPoint, error) {
+	if days < 1 || days > 365 {
+		days = 30
+	}
+	since := time.Now().AddDate(0, 0, -days+1).Truncate(24 * time.Hour).Unix()
+	rows, err := s.db.QueryContext(ctx, `SELECT date(created_at,'unixepoch') AS day, COUNT(*)
+		FROM licenses WHERE created_at>=? GROUP BY day ORDER BY day`, since)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+	out := []TrendPoint{}
+	for rows.Next() {
+		var p TrendPoint
+		if err := rows.Scan(&p.Day, &p.Count); err != nil {
+			return nil, err
+		}
+		out = append(out, p)
+	}
+	return out, rows.Err()
+}
+
+// ProductCount 按产品统计的 license 数量.
+type ProductCount struct {
+	Name  string `json:"name"`
+	Count int    `json:"count"`
+}
+
+// LicensesByProduct 按产品聚合 license 数量(含未关联产品).
+func (s *Store) LicensesByProduct(ctx context.Context) ([]ProductCount, error) {
+	rows, err := s.db.QueryContext(ctx, `SELECT COALESCE(NULLIF(product_name,''),'未关联产品') AS name, COUNT(*)
+		FROM licenses GROUP BY name ORDER BY COUNT(*) DESC`)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+	out := []ProductCount{}
+	for rows.Next() {
+		var p ProductCount
+		if err := rows.Scan(&p.Name, &p.Count); err != nil {
+			return nil, err
+		}
+		out = append(out, p)
+	}
+	return out, rows.Err()
+}
+
+// ExpiringSoon 即将到期(7 天内)的 active 授权,按到期时间升序.
+// 注意: 先收完结果集再逐行 ToView —— MaxOpenConns(1) 下迭代中再查询会死锁.
+func (s *Store) ExpiringSoon(ctx context.Context, now int64, limit int) ([]*LicenseView, error) {
+	if limit < 1 || limit > 50 {
+		limit = 10
+	}
+	rows, err := s.db.QueryContext(ctx, `SELECT `+licenseCols+`
+		FROM licenses WHERE status='active' AND expires_at>? AND expires_at<=?
+		ORDER BY expires_at LIMIT ?`, now, now+7*86400, limit)
+	if err != nil {
+		return nil, err
+	}
+	var ls []*LicenseRow
+	for rows.Next() {
+		l, err := scanLicense(rows)
+		if err != nil {
+			_ = rows.Close()
+			return nil, err
+		}
+		ls = append(ls, l)
+	}
+	if err := rows.Err(); err != nil {
+		_ = rows.Close()
+		return nil, err
+	}
+	_ = rows.Close()
+
+	out := []*LicenseView{}
+	for _, l := range ls {
+		v, err := s.ToView(ctx, l)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, v)
+	}
+	return out, nil
 }
 
 // ---------------------------------------------------------------------------
