@@ -4,3 +4,5 @@ licenses.db*
 *.db-journal
 *.db-wal
 *.db-shm
+ui-demo.*
+dist/
