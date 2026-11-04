@@ -41,13 +41,13 @@ Ed25519 签名 access JWT · 设备绑定席位 · refresh 轮换重用检测 ·
 
 ## 🖥 管理台
 
-**授权管理** —— 签发 / 检索 / 续期 / 吊销 / 踢设备,整行点击进详情:
-
-<img src="docs/screenshots/licenses.png" alt="授权管理" width="100%">
-
-**签发 License** —— 选客户、选产品、签发,三步完事。产品模板定义功能标记与默认天数 / 席位;签发后 license 持有快照,改产品不影响已发出的授权:
-
-<img src="docs/screenshots/issue.png" alt="签发 License" width="49%"> <img src="docs/screenshots/products.png" alt="产品" width="49%">
+| 登录门禁 | Dashboard |
+|---|---|
+| ![登录](docs/screenshots/login.png) | ![Dashboard](docs/screenshots/dashboard.png) |
+| **授权管理** | **签发 License** |
+| ![授权管理](docs/screenshots/licenses.png) | ![签发](docs/screenshots/issue.png) |
+| **产品目录** | |
+| ![产品](docs/screenshots/products.png) | |
 
 ## 🚀 快速开始
 
