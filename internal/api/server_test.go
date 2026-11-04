@@ -43,7 +43,7 @@ func testServerWithRate(t *testing.T, rps float64, burst int) *testEnv {
 		t.Fatal(err)
 	}
 	db.SetMaxOpenConns(1)
-	t.Cleanup(func() { db.Close() })
+	t.Cleanup(func() { _ = db.Close() })
 	_, priv, err := ed25519.GenerateKey(rand.Reader)
 	if err != nil {
 		t.Fatal(err)

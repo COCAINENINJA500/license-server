@@ -66,7 +66,7 @@ func Open(path string) (*Store, error) {
 	// 单写者模型:modernc/sqlite 多连接并发写会 SQLITE_BUSY,限 1 连接最稳.
 	db.SetMaxOpenConns(1)
 	if err := initDB(db); err != nil {
-		db.Close()
+		_ = db.Close()
 		return nil, err
 	}
 	return &Store{db: db}, nil
@@ -191,7 +191,7 @@ func (s *Store) DeleteLicense(ctx context.Context, id string) (int64, error) {
 	if err != nil {
 		return 0, err
 	}
-	defer tx.Rollback()
+	defer func() { _ = tx.Rollback() }()
 	if _, err := tx.ExecContext(ctx, `DELETE FROM activations WHERE license_id=?`, id); err != nil {
 		return 0, err
 	}
@@ -252,7 +252,7 @@ func (s *Store) ListMachines(ctx context.Context, licenseID string) ([]*MachineV
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	var out []*MachineView
 	for rows.Next() {
 		var m MachineView
@@ -398,7 +398,7 @@ func (s *Store) ListPage(ctx context.Context, q, status string, page, pageSize i
 	if err != nil {
 		return nil, 0, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	out := []*LicenseView{}
 	for rows.Next() {

@@ -57,7 +57,7 @@ func main() {
 	if err != nil {
 		log.Fatalf("初始化数据库失败: %v", err)
 	}
-	defer st.Close()
+	defer func() { _ = st.Close() }()
 
 	signer := licensing.NewSigner(priv, cfg.AccessTTL, cfg.RefreshTTL)
 	nonces := licensing.NewNonceStore(licensing.NonceRetention, nil)
