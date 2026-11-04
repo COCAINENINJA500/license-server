@@ -41,4 +41,25 @@ jobs:
       - name: upload release assets
         uses: softprops/action-gh-release@v2
         with:
+          generate_release_notes: false
+          body: |
+            ## license-server ${{ github.ref_name }}
+
+            轻量云端 License 鉴权服务端 —— 单二进制 · Ed25519 · 设备绑定席位 · SQLite 单文件。
+
+            ### 下载
+
+            | 平台 | 文件 |
+            |---|---|
+            | Windows x64 | `license-server-windows-amd64.zip` |
+            | Linux x64 / arm64 | `license-server-linux-amd64.tar.gz` · `license-server-linux-arm64.tar.gz` |
+            | macOS x64 / arm64 | `license-server-darwin-amd64.tar.gz` · `license-server-darwin-arm64.tar.gz` |
+
+            ### 运行
+
+            ```bash
+            LICENSE_ADMIN_KEY=<你的管理Key> ./license-server --addr :8080 --db licenses.db
+            ```
+
+            管理台: http://127.0.0.1:8080/admin · Docker 部署与接入指南见 README。
           files: dist/*
