@@ -625,3 +625,81 @@ func TestIntegrationPrompt(t *testing.T) {
 		t.Fatalf("提示词应完整包含对接文档全文")
 	}
 }
+
+// ---------------------------------------------------------------------------
+// 14. 产品目录: CRUD + 签发按产品带入默认值
+// ---------------------------------------------------------------------------
+
+func TestProducts(t *testing.T) {
+	env := testServer(t)
+	// create
+	rec := doReq(t, env, "POST", "/admin/products", map[string]any{
+		"name": "Pro 版", "features": map[string]any{"pro": true, "level": "vip"},
+		"default_days": 90, "default_seats": 3,
+	}, adminHeaders())
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("创建产品应 201: %d %s", rec.Code, rec.Body.String())
+	}
+	pid := decodeBody(t, rec)["product_id"].(string)
+
+	// 重名冲突 409
+	if rec := doReq(t, env, "POST", "/admin/products", map[string]any{"name": "Pro 版"}, adminHeaders()); rec.Code != http.StatusConflict {
+		t.Fatalf("重名应 409: got %d", rec.Code)
+	}
+
+	// 列表
+	if rec := doReq(t, env, "GET", "/admin/products", nil, adminHeaders()); rec.Code != http.StatusOK {
+		t.Fatalf("列表应 200: %d", rec.Code)
+	}
+
+	// update
+	if rec := doReq(t, env, "POST", "/admin/products/"+pid+"/update", map[string]any{"name": "Pro Max", "default_days": 180}, adminHeaders()); rec.Code != http.StatusOK {
+		t.Fatalf("更新应 200: %d %s", rec.Code, rec.Body.String())
+	}
+
+	// 签发: 只带 product_id → 全部取产品默认值
+	rec = doReq(t, env, "POST", "/admin/licenses", map[string]any{"customer": "Acme", "product_id": pid}, adminHeaders())
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("按产品签发应 201: %d %s", rec.Code, rec.Body.String())
+	}
+	out := decodeBody(t, rec)
+	if out["seats"] != float64(3) {
+		t.Fatalf("席位应取产品默认 3: %v", out["seats"])
+	}
+	if feat := out["features"].(map[string]any); feat["pro"] != true {
+		t.Fatalf("features 应取产品模板: %v", out["features"])
+	}
+	lid := out["license_id"].(string)
+
+	// 到期时间 = +180 天
+	rec = doReq(t, env, "GET", "/admin/licenses/"+lid, nil, adminHeaders())
+	exp := int64(decodeBody(t, rec)["license"].(map[string]any)["expires_at"].(float64))
+	if exp < time.Now().Unix()+178*86400 {
+		t.Fatalf("天数应取产品默认 180: %d", exp)
+	}
+
+	// 签发: 显式 features 覆盖产品模板
+	rec = doReq(t, env, "POST", "/admin/licenses", map[string]any{
+		"customer": "Acme2", "product_id": pid,
+		"features": map[string]any{"pro": false},
+	}, adminHeaders())
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("覆盖 features 签发应 201: %d %s", rec.Code, rec.Body.String())
+	}
+	if feat := decodeBody(t, rec)["features"].(map[string]any); feat["pro"] != false {
+		t.Fatalf("显式 features 应覆盖产品模板: %v", feat)
+	}
+
+	// 不存在的 product
+	if rec := doReq(t, env, "POST", "/admin/licenses", map[string]any{"customer": "X", "product_id": "deadbeef"}, adminHeaders()); rec.Code != http.StatusBadRequest {
+		t.Fatalf("product 不存在应 400: got %d", rec.Code)
+	}
+
+	// delete + 重复删除 404
+	if rec := doReq(t, env, "DELETE", "/admin/products/"+pid, nil, adminHeaders()); rec.Code != http.StatusOK {
+		t.Fatalf("删除应 200: %d", rec.Code)
+	}
+	if rec := doReq(t, env, "DELETE", "/admin/products/"+pid, nil, adminHeaders()); rec.Code != http.StatusNotFound {
+		t.Fatalf("重复删除应 404: %d", rec.Code)
+	}
+}

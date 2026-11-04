@@ -42,13 +42,16 @@ func (s *Server) handleIntegrationPrompt(w http.ResponseWriter, r *http.Request)
 }
 
 type issueReq struct {
-	Customer string          `json:"customer"`
-	Days     int             `json:"days"`
-	Seats    int             `json:"seats"`
-	Features json.RawMessage `json:"features"`
+	Customer  string          `json:"customer"`
+	ProductID string          `json:"product_id"`
+	Days      *int            `json:"days"`
+	Seats     *int            `json:"seats"`
+	Features  json.RawMessage `json:"features"`
 }
 
 // POST /admin/licenses 签发 license. license_key 明文仅此一次返回,服务端只存 SHA256.
+// 可选 product_id: 未提供的 days/seats/features 自动带入产品默认值
+// (产品是签发侧模板,license 持有签发时的 features 快照).
 func (s *Server) handleIssue(w http.ResponseWriter, r *http.Request) {
 	var req issueReq
 	if herr := decodeJSON(r, &req); herr != nil {
@@ -60,11 +63,39 @@ func (s *Server) handleIssue(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, badRequest("customer 必填且不超过 128 字符"))
 		return
 	}
-	if req.Days < 1 || req.Days > 3650 {
+	ctx := r.Context()
+	var product *store.ProductRow
+	if req.ProductID != "" {
+		p, err := s.Store.GetProductByID(ctx, req.ProductID)
+		if err != nil {
+			writeInternal(w, err)
+			return
+		}
+		if p == nil {
+			writeErr(w, badRequest("product 不存在"))
+			return
+		}
+		product = p
+	}
+	days := 0
+	if req.Days != nil {
+		days = *req.Days
+	}
+	if days == 0 && product != nil {
+		days = product.DefaultDays
+	}
+	if days < 1 || days > 3650 {
 		writeErr(w, badRequest("days 取值范围 1~3650"))
 		return
 	}
-	if req.Seats < 1 || req.Seats > 100000 {
+	seats := 0
+	if req.Seats != nil {
+		seats = *req.Seats
+	}
+	if seats == 0 && product != nil {
+		seats = product.DefaultSeats
+	}
+	if seats < 1 || seats > 100000 {
 		writeErr(w, badRequest("seats 取值范围 1~100000"))
 		return
 	}
@@ -76,10 +107,11 @@ func (s *Server) handleIssue(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		features = string(req.Features)
+	} else if product != nil {
+		features = product.Features
 	}
 
 	nowUnix := s.nowTime().Unix()
-	ctx := r.Context()
 	for tries := 0; tries < 3; tries++ {
 		id, err := randomHex(8)
 		if err != nil {
@@ -96,8 +128,8 @@ func (s *Server) handleIssue(w http.ResponseWriter, r *http.Request) {
 			ID:        id,
 			KeyHash:   sha256Hex(key),
 			Customer:  req.Customer,
-			Seats:     req.Seats,
-			ExpiresAt: nowUnix + int64(req.Days)*86400,
+			Seats:     seats,
+			ExpiresAt: nowUnix + int64(days)*86400,
 			Features:  features,
 			Status:    "active",
 			CreatedAt: nowUnix,
@@ -109,12 +141,12 @@ func (s *Server) handleIssue(w http.ResponseWriter, r *http.Request) {
 			writeInternal(w, err)
 			return
 		}
-		log.Printf("签发 license: id=%s customer=%s seats=%d days=%d", id, req.Customer, req.Seats, req.Days)
+		log.Printf("签发 license: id=%s customer=%s seats=%d days=%d", id, req.Customer, seats, days)
 		writeJSON(w, http.StatusCreated, map[string]any{
 			"license_id":  id,
 			"license_key": key, // 明文仅返回一次
 			"customer":    req.Customer,
-			"seats":       req.Seats,
+			"seats":       seats,
 			"expires_at":  l.ExpiresAt,
 			"features":    json.RawMessage(features),
 			"status":      "active",

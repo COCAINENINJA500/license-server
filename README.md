@@ -33,7 +33,7 @@ Ed25519 签名 access JWT · 设备绑定席位 · refresh 轮换与重用检测
 | 🪑 **席位制设备绑定** | `machine_hash` 维度绑定，同机重复激活幂等，超席位 403 |
 | 🔄 **refresh 轮换 + 重用检测** | 每次续期换发新 refresh；被轮换的旧 token 再次出现立即 `401`（防盗用） |
 | 🛡 **防重放** | `timestamp` ±5 分钟 + `nonce` 双代内存去重（O(1) 清理），复用 `409` |
-| 🖥 **内嵌管理台** | 单文件 HTML SPA 打进二进制：概览 / 分页台账 / 签发 / 续期 / 吊销 / 踢设备 |
+| 🖥 **内嵌管理台** | 单文件 HTML SPA 打进二进制：概览 / 台账 / 产品模板 / 签发 / 续期 / 吊销 / 踢设备 |
 | 🚦 **内置防御** | 每 IP 限流（429）、请求体 1 MiB 上限（413）、全套 HTTP 超时、panic 隔离 |
 | 📦 **交付友好** | 零 CGO 静态编译、WAL SQLite、distroless 非 root 容器、`/healthz` 带版本号 |
 
@@ -102,8 +102,9 @@ curl http://127.0.0.1:8080/healthz
 内嵌多页面 SPA（hash 路由，黑白中性色 + 深色模式）：
 
 - **概览**：统计卡（总数 / 有效 / 即将到期 / 已过期 / 已吊销 / 席位占用）+ 最近签发
-- **台账**：服务端分页表格（搜索、状态筛选、列排序、每页条数），行内操作
-- **接入指南**：一键下载 `GET /admin/integration.md`（内嵌本实例真实公钥，直接丢给其他 Coding Agent）、公钥展示、features 说明
+- **台账**：服务端分页表格（搜索、状态筛选、列排序、每页条数），整行点击进详情
+- **产品**：维护产品模板（功能标记 + 默认天数 / 席位），签发时选择产品自动带入
+- **接入指南**：一键**复制 AI 对接提示词**（内嵌本实例真实公钥，粘贴给任意 Coding Agent 即可开工）、下载 Markdown 文档、公钥展示、features 说明
 
 操作涵盖：签发（`license_key` 明文只显示一次）、详情（设备列表）、续期、编辑功能标记、吊销 / 恢复、踢设备、彻底删除。
 
@@ -113,7 +114,7 @@ curl http://127.0.0.1:8080/healthz
 
 | 方法 | 路径 | 说明 |
 |---|---|---|
-| `POST` | `/admin/licenses` | 签发，body `{"customer","days","seats","features"}`，`license_key` 明文仅返回一次 |
+| `POST` | `/admin/licenses` | 签发，body `{"customer","product_id"?,"days"?,"seats"?,"features"?}`——带 `product_id` 时未提供的字段自动取产品默认值；`license_key` 明文仅返回一次 |
 | `GET` | `/admin/licenses` | 分页列表，query `q`（客户/ID 模糊）、`status`（`all`/`active`/`expiring`/`expired`/`revoked`）、`page`、`page_size`(≤100)、`sort`、`order` |
 | `GET` | `/admin/stats` | 汇总统计 |
 | `GET` | `/admin/licenses/{id}` | 查询单个 + 设备列表 |
@@ -125,6 +126,15 @@ curl http://127.0.0.1:8080/healthz
 | `DELETE` | `/admin/licenses/{id}` | **彻底删除**该 license 及全部设备记录（不可恢复） |
 | `DELETE` | `/admin/licenses/{id}/machines` | 解绑全部设备，释放席位 |
 | `DELETE` | `/admin/licenses/{id}/machines/{mhash}` | 踢单台设备，释放席位 |
+
+产品目录（签发侧模板，管理 license 时选择产品自动带入默认配置；产品变更不影响已签发 license 的快照）：
+
+| 方法 | 路径 | 说明 |
+|---|---|---|
+| `POST` | `/admin/products` | 新增产品，body `{"name","features","default_days","default_seats"}`（重名 409） |
+| `GET` | `/admin/products` | 产品列表 |
+| `POST` | `/admin/products/{id}/update` | 修改产品（可只传部分字段） |
+| `DELETE` | `/admin/products/{id}` | 删除产品（已签发 license 不受影响） |
 
 客户端 API：
 
@@ -216,6 +226,8 @@ licenses(id, key_hash UNIQUE, customer, seats, expires_at, features, status, cre
 -- key_hash = SHA256 hex(license_key)，库里永远没有明文 key
 activations(license_id, machine_hash, first_seen, last_seen, current_refresh_jti,
             PRIMARY KEY(license_id, machine_hash))
+products(id, name UNIQUE, features, default_days, default_seats, created_at)
+-- 产品是签发侧模板:签发时把产品的 features / 默认值复制进 license,此后两者互不影响
 ```
 
 - refresh token 是自包含 JWT（`typ=refresh`，内含 license_id + machine_hash），无需落库，两张表足够。

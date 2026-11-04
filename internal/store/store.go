@@ -94,6 +94,14 @@ CREATE TABLE IF NOT EXISTS activations (
 	last_seen    INTEGER NOT NULL,
 	PRIMARY KEY (license_id, machine_hash)
 );
+CREATE TABLE IF NOT EXISTS products (
+	id           TEXT PRIMARY KEY,
+	name         TEXT UNIQUE NOT NULL,
+	features     TEXT NOT NULL DEFAULT '{}',
+	default_days INTEGER NOT NULL DEFAULT 365,
+	default_seats INTEGER NOT NULL DEFAULT 5,
+	created_at   INTEGER NOT NULL
+);
 `
 
 func initDB(db *sql.DB) error {
@@ -438,4 +446,104 @@ func (s *Store) ToView(ctx context.Context, l *LicenseRow) (*LicenseView, error)
 		ExpiresAt: l.ExpiresAt, Status: l.Status,
 		Features: json.RawMessage(feat), CreatedAt: l.CreatedAt,
 	}, nil
+}
+
+// ---------------------------------------------------------------------------
+// 产品目录: 签发 license 时按产品带入默认 features / 天数 / 席位.
+// 产品只是签发侧的模板;签发后 license 持有 features 快照,与产品后续变更无关.
+// ---------------------------------------------------------------------------
+
+// ProductRow products 表整行.
+type ProductRow struct {
+	ID           string
+	Name         string
+	Features     string
+	DefaultDays  int
+	DefaultSeats int
+	CreatedAt    int64
+}
+
+// ProductView 管理 API 返回的产品视图.
+type ProductView struct {
+	ProductID    string          `json:"product_id"`
+	Name         string          `json:"name"`
+	Features     json.RawMessage `json:"features"`
+	DefaultDays  int             `json:"default_days"`
+	DefaultSeats int             `json:"default_seats"`
+	CreatedAt    int64           `json:"created_at"`
+}
+
+func (p *ProductRow) View() *ProductView {
+	feat := p.Features
+	if feat == "" {
+		feat = "{}"
+	}
+	return &ProductView{
+		ProductID: p.ID, Name: p.Name,
+		Features: json.RawMessage(feat),
+		DefaultDays: p.DefaultDays, DefaultSeats: p.DefaultSeats,
+		CreatedAt: p.CreatedAt,
+	}
+}
+
+// CreateProduct 新增产品(name UNIQUE 冲突由调用方处理).
+func (s *Store) CreateProduct(ctx context.Context, p *ProductRow) error {
+	_, err := s.db.ExecContext(ctx,
+		`INSERT INTO products(id,name,features,default_days,default_seats,created_at) VALUES(?,?,?,?,?,?)`,
+		p.ID, p.Name, p.Features, p.DefaultDays, p.DefaultSeats, p.CreatedAt)
+	return err
+}
+
+// ListProducts 全部产品,按创建时间倒序.
+func (s *Store) ListProducts(ctx context.Context) ([]*ProductView, error) {
+	rows, err := s.db.QueryContext(ctx,
+		`SELECT id,name,features,default_days,default_seats,created_at FROM products ORDER BY created_at DESC`)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+	out := []*ProductView{}
+	for rows.Next() {
+		var p ProductRow
+		if err := rows.Scan(&p.ID, &p.Name, &p.Features, &p.DefaultDays, &p.DefaultSeats, &p.CreatedAt); err != nil {
+			return nil, err
+		}
+		out = append(out, p.View())
+	}
+	if out == nil {
+		out = []*ProductView{}
+	}
+	return out, rows.Err()
+}
+
+// GetProductByID 按 id 查询. 未命中返回 (nil, nil).
+func (s *Store) GetProductByID(ctx context.Context, id string) (*ProductRow, error) {
+	var p ProductRow
+	err := s.db.QueryRowContext(ctx,
+		`SELECT id,name,features,default_days,default_seats,created_at FROM products WHERE id=?`, id).
+		Scan(&p.ID, &p.Name, &p.Features, &p.DefaultDays, &p.DefaultSeats, &p.CreatedAt)
+	if err == sql.ErrNoRows {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	return &p, nil
+}
+
+// UpdateProduct 修改产品(模板变更不影响已签发的 license 快照).
+func (s *Store) UpdateProduct(ctx context.Context, id, name, features string, days, seats int) error {
+	_, err := s.db.ExecContext(ctx,
+		`UPDATE products SET name=?, features=?, default_days=?, default_seats=? WHERE id=?`,
+		name, features, days, seats, id)
+	return err
+}
+
+// DeleteProduct 删除产品. 返回删除行数(0 = 不存在). 已签发 license 不受影响.
+func (s *Store) DeleteProduct(ctx context.Context, id string) (int64, error) {
+	res, err := s.db.ExecContext(ctx, `DELETE FROM products WHERE id=?`, id)
+	if err != nil {
+		return 0, err
+	}
+	return res.RowsAffected()
 }

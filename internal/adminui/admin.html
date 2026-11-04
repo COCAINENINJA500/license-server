@@ -201,6 +201,7 @@ code{background:var(--muted);border:1px solid var(--border);border-radius:5px;pa
 <nav class="tabs">
 <a href="#/dashboard" data-route="dashboard">概览</a>
 <a href="#/licenses" data-route="licenses">台账</a>
+<a href="#/products" data-route="products">产品</a>
 <a href="#/docs" data-route="docs">接入指南</a>
 </nav>
 <div class="topbar-right">
@@ -219,7 +220,7 @@ var state = {
   key:'', route:'dashboard',
   licenses:[], total:0, pageNum:1, pageSize:20, totalPages:1,
   q:'', status:'all', sort:'created_at', order:'desc',
-  detail:null, searchTimer:null
+  detail:null, searchTimer:null, products:[]
 };
 var STATUS_LABEL = { active:'有效', expiring:'即将到期', expired:'已过期', revoked:'已吊销' };
 var WEEK = 7*86400;
@@ -320,10 +321,11 @@ function remainCls(l){ var st=statusOf(l); return (st==='expired'||st==='revoked
 /* ---------- 路由 ---------- */
 function navigate(){
   var h=(location.hash||'').replace(/^#\/?/,'').split('?')[0] || 'dashboard';
-  if(['dashboard','licenses','docs'].indexOf(h)<0) h='dashboard';
+  if(['dashboard','licenses','products','docs'].indexOf(h)<0) h='dashboard';
   state.route=h;
   document.querySelectorAll('.tabs a').forEach(function(a){ a.classList.toggle('active', a.getAttribute('data-route')===h); });
   if(h==='licenses'){ renderLicensesPage(); loadLicenses(); }
+  else if(h==='products'){ renderProductsPage(); loadProducts(); }
   else if(h==='docs'){ renderDocsPage(); loadPubkey(); }
   else { renderDashboardPage(); loadStats(); loadRecent(); }
 }
@@ -480,6 +482,83 @@ function toggleSort(k){
   state.pageNum=1; updateSortHeaders(); loadLicenses();
 }
 
+/* ---------- 产品页 ---------- */
+function renderProductsPage(){
+  $id('page').innerHTML=
+    '<div class="page-head"><h1>产品</h1><p>维护产品模板:签发 license 时选择产品,自动带入功能标记与默认天数 / 席位</p></div>'+
+    '<section class="card"><div class="card-head"><h2>产品列表</h2><span id="pcount" class="hint mono"></span><span class="spacer"></span>'+
+      '<button class="btn btn-sm" onclick="openProductCreate()">新增产品</button></div>'+
+      '<div class="table-wrap"><table><thead><tr><th>产品</th><th>功能标记</th><th>默认天数</th><th>默认席位</th><th>创建时间</th><th>操作</th></tr></thead>'+
+      '<tbody id="prows"><tr><td colspan="6" class="empty">加载中…</td></tr></tbody></table></div>'+
+      '<p class="hint" style="margin-top:10px">产品只是签发模板:修改 / 删除产品不会影响已签发的 license。</p>'+
+    '</section>';
+}
+function featText(f){
+  return typeof f==='string'?f:JSON.stringify(f);
+}
+async function loadProducts(){
+  try{
+    var d=await api('/admin/products');
+    state.products=d.products||[];
+    var tb=$id('prows'); if(!tb) return;
+    if($id('pcount')) $id('pcount').textContent='共 '+state.products.length+' 个';
+    tb.innerHTML=state.products.length?state.products.map(function(p){
+      var feat=featText(p.features);
+      return '<tr data-pid="'+esc(p.product_id)+'">'+
+        '<td><b>'+esc(p.name)+'</b></td>'+
+        '<td><span class="mono" title="'+esc(feat)+'">'+esc(feat.length>48?feat.slice(0,48)+'…':feat)+'</span></td>'+
+        '<td class="mono">'+p.default_days+' 天</td>'+
+        '<td class="mono">'+p.default_seats+'</td>'+
+        '<td class="sub">'+fmtDate(p.created_at)+'</td>'+
+        '<td><div class="ops"><button class="btn btn-outline btn-sm" data-pact="edit" data-pid="'+esc(p.product_id)+'">编辑</button>'+
+        '<button class="btn btn-ghost btn-sm" data-pact="del" data-pid="'+esc(p.product_id)+'">删除</button></div></td></tr>';
+    }).join(''):'<tr><td colspan="6" class="empty">还没有产品,点右上角「新增产品」创建第一个</td></tr>';
+  }catch(e){ toast('加载产品失败：'+e.message,'err'); }
+}
+function productById(pid){ return state.products.filter(function(p){ return p.product_id===pid; })[0]; }
+function openProductCreate(){
+  openModal('<h3>新增产品</h3>'+
+    '<label class="field">产品名称<input id="pName" placeholder="例如: NiumakejiAI Pro"></label>'+
+    '<label class="field" style="margin-top:12px">功能标记 (JSON)<textarea id="pFeatures" rows="4">{ "pro": true }</textarea></label>'+
+    '<div class="form-grid" style="margin-top:12px">'+
+    '<label class="field">默认有效天数<input id="pDays" type="number" value="365" min="1" max="3650"></label>'+
+    '<label class="field">默认席位数<input id="pSeats" type="number" value="5" min="1" max="100000"></label></div>'+
+    '<p class="hint" style="margin-top:8px">签发 license 时选择产品会自动带入这些默认值,仍可按单微调。</p>'+
+    '<div class="modal-foot"><button class="btn btn-outline" onclick="closeModal()">取消</button>'+
+    '<button class="btn" onclick="saveProduct()">创建</button></div>');
+}
+function openProductEdit(pid){
+  var p=productById(pid); if(!p) return;
+  var feat=typeof p.features==='string'?p.features:JSON.stringify(p.features,null,2);
+  openModal('<h3>编辑产品</h3>'+
+    '<label class="field">产品名称<input id="pName" value="'+esc(p.name)+'"></label>'+
+    '<label class="field" style="margin-top:12px">功能标记 (JSON)<textarea id="pFeatures" rows="4">'+esc(feat)+'</textarea></label>'+
+    '<div class="form-grid" style="margin-top:12px">'+
+    '<label class="field">默认有效天数<input id="pDays" type="number" value="'+p.default_days+'" min="1" max="3650"></label>'+
+    '<label class="field">默认席位数<input id="pSeats" type="number" value="'+p.default_seats+'" min="1" max="100000"></label></div>'+
+    '<div class="modal-foot"><button class="btn btn-outline" onclick="closeModal()">取消</button>'+
+    '<button class="btn" onclick="saveProduct(\''+esc(pid)+'\')">保存</button></div>');
+}
+async function saveProduct(pid){
+  var name=$id('pName').value.trim();
+  var raw=$id('pFeatures').value.trim()||'{}';
+  var days=parseInt($id('pDays').value,10), seats=parseInt($id('pSeats').value,10);
+  var features; try{ features=JSON.parse(raw); }catch(e){ toast('功能标记不是合法 JSON','err'); return; }
+  if(!name){ toast('产品名称必填','err'); return; }
+  if(!days||days<1||days>3650){ toast('天数需为 1~3650','err'); return; }
+  if(!seats||seats<1||seats>100000){ toast('席位需为 1~100000','err'); return; }
+  var body={ name:name, features:features, default_days:days, default_seats:seats };
+  try{
+    if(pid) await api('/admin/products/'+encodeURIComponent(pid)+'/update','POST',body);
+    else await api('/admin/products','POST',body);
+    closeModal(); toast(pid?'产品已保存':'产品已创建','ok'); loadProducts();
+  }catch(e){ toast('保存失败：'+e.message,'err'); }
+}
+async function deleteProduct(pid){
+  try{ await api('/admin/products/'+encodeURIComponent(pid),'DELETE'); toast('产品已删除(已签发 license 不受影响)','ok'); loadProducts(); }
+  catch(e){ toast('删除失败：'+e.message,'err'); }
+}
+
 /* ---------- 接入指南页 ---------- */
 function renderDocsPage(){
   $id('page').innerHTML=
@@ -493,7 +572,7 @@ function renderDocsPage(){
     '<section class="card"><div class="card-head"><h2>客户端公钥</h2><span class="hint">随客户端发布,用于本地验签 access JWT</span></div>'+
       '<div id="pubkeyBox"><div class="empty">加载中…</div></div></section>'+
     '<section class="card"><div class="card-head"><h2>功能标记 (features)</h2></div>'+
-      '<p class="doc-p">features 是绑定在 license 上的<b>任意 JSON</b>。签发时入库,并在每次 <code>activate</code> / <code>refresh</code> 写入 access JWT 的 <code>features</code> 声明(服务端 Ed25519 签名)。客户端本地验签后读取,用于功能开关与配额,例如:</p>'+
+      '<p class="doc-p">features 是绑定在 license 上的<b>任意 JSON</b>,客户端验签后读取做功能开关与配额。在「产品」页维护产品模板,签发时选择产品即自动带入,无需手写。例如:</p>'+
       '<pre class="code">{ "pro": true, "max_projects": 20 }</pre>'+
       '<p class="doc-p">可在台账「详情 → 编辑功能」修改,客户端下次 refresh 后生效。</p></section>'+
     '<section class="card"><div class="card-head"><h2>模型与安全</h2></div>'+
@@ -544,6 +623,12 @@ async function copyIntegrationPrompt(btn){
 /* ---------- 页内事件委托 ---------- */
 $id('page').addEventListener('click',function(e){
   var c=e.target.closest('[data-copy]'); if(c){ copy(c.getAttribute('data-copy'),'已复制'); return; }
+  var pb=e.target.closest('button[data-pact]'); if(pb){
+    var pid=pb.getAttribute('data-pid'), pa=pb.getAttribute('data-pact');
+    if(pa==='edit') openProductEdit(pid);
+    else if(pa==='del') confirmDialog('删除产品','删除产品模板不会影响已签发的 license。确定删除？','删除',function(){ deleteProduct(pid); });
+    return;
+  }
   var sel=e.target.closest('.select');
   if(sel){
     if(e.target.closest('.select-trigger')){ toggleSelect(sel); return; }
@@ -585,24 +670,48 @@ $id('modalBody').addEventListener('click',function(e){
 });
 
 /* ---------- 签发 ---------- */
+function productOptions(){
+  var opts='<option value="">自定义(手动填写)</option>';
+  state.products.forEach(function(p){
+    opts+='<option value="'+esc(p.product_id)+'">'+esc(p.name)+' · 默认 '+p.default_days+' 天 / '+p.default_seats+' 席位</option>';
+  });
+  return opts;
+}
 function openIssue(){
   openModal('<h3>签发 License</h3>'+
     '<div class="form-grid"><label class="field">客户名<input id="fCustomer" placeholder="Acme"></label>'+
+    '<label class="field">产品<select id="fProduct" onchange="applyProduct()">'+productOptions()+'</select></label>'+
     '<label class="field">有效天数<input id="fDays" type="number" value="365" min="1" max="3650"></label>'+
     '<label class="field">席位数<input id="fSeats" type="number" value="5" min="1" max="100000"></label></div>'+
-    '<label class="field" style="margin-top:12px">功能标记 (JSON,可留空)<textarea id="fFeatures" rows="3">{ "pro": true }</textarea></label>'+
-    '<p class="hint" style="margin-top:8px">功能标记会写入 access JWT,客户端验签后读取做功能开关/配额。</p>'+
+    '<label class="field" style="margin-top:12px">功能标记 (JSON,选产品自动带入,可微调)<textarea id="fFeatures" rows="3">{ "pro": true }</textarea></label>'+
+    '<p class="hint" style="margin-top:8px">功能标记会写入 access JWT,客户端验签后读取做功能开关 / 配额;产品只是默认模板,签发后可按单调整。</p>'+
     '<div class="modal-foot"><button class="btn btn-outline" onclick="closeModal()">取消</button><button class="btn" id="issueBtn" onclick="issue()">签发</button></div>');
+  // 打开时刷新一次产品列表(与 state 同步)
+  api('/admin/products').then(function(d){
+    state.products=d.products||[];
+    var sel=$id('fProduct'); if(!sel) return;
+    var cur=sel.value;
+    sel.innerHTML=productOptions(); sel.value=cur;
+  })['catch'](function(){});
+}
+function applyProduct(){
+  var pid=$id('fProduct').value; if(!pid) return;
+  var p=productById(pid); if(!p) return;
+  $id('fDays').value=p.default_days; $id('fSeats').value=p.default_seats;
+  $id('fFeatures').value=featText(p.features);
 }
 async function issue(){
   var customer=$id('fCustomer').value.trim();
   var days=parseInt($id('fDays').value,10);
   var seats=parseInt($id('fSeats').value,10);
+  var pid=$id('fProduct') ? $id('fProduct').value : '';
   var raw=$id('fFeatures').value.trim()||'{}';
   var features; try{ features=JSON.parse(raw); }catch(e){ toast('功能标记不是合法 JSON','err'); return; }
   var btn=$id('issueBtn'); btn.disabled=true;
   try{
-    var out=await api('/admin/licenses','POST',{ customer:customer, days:days, seats:seats, features:features });
+    var body={ customer:customer, days:days, seats:seats, features:features };
+    if(pid) body.product_id=pid;
+    var out=await api('/admin/licenses','POST',body);
     closeModal();
     openModal('<h3>签发成功</h3>'+
       '<div class="warn">license_key 明文只显示这一次,请立即复制发给客户;服务端只存其 SHA256 哈希。</div>'+
@@ -691,6 +800,7 @@ async function saveFeatures(){
 /* ---------- 操作 ---------- */
 function refreshCurrent(){
   if(state.route==='licenses') loadLicenses();
+  else if(state.route==='products') loadProducts();
   else if(state.route==='dashboard'){ loadStats(); loadRecent(); }
 }
 function refreshModal(id){ if($id('modalWrap').classList.contains('open') && state.detail && state.detail.license_id===id) showDetail(id); }
