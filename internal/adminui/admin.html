@@ -118,6 +118,7 @@ th[data-sort][data-dir="asc"]::after{content:"\25B2";opacity:.8}
 th[data-sort][data-dir="desc"]::after{content:"\25BC";opacity:.8}
 tbody tr:last-child td{border-bottom:0}
 tbody tr:hover{background:var(--accent)}
+tbody tr[data-id]{cursor:pointer}
 .mono{font-family:var(--mono);font-size:12px}
 .id{color:var(--muted-foreground)}
 .sub{font-size:11.5px;color:var(--muted-foreground)}
@@ -203,7 +204,7 @@ code{background:var(--muted);border:1px solid var(--border);border-radius:5px;pa
 <a href="#/docs" data-route="docs">接入指南</a>
 </nav>
 <div class="topbar-right">
-<span class="conn"><span class="dot"></span>已连接</span>
+<span class="conn"><span class="dot" id="connDot"></span><span id="connText">已连接</span></span>
 <button id="themeBtn" class="icon-btn" onclick="toggleTheme()" title="切换主题" aria-label="切换主题"></button>
 <button class="btn btn-outline btn-sm" onclick="logout()">退出</button>
 </div>
@@ -280,10 +281,21 @@ function doLogin(ev){
 }
 function logout(){
   state.key=''; state.licenses=[]; state.detail=null;
-  try{ localStorage.removeItem('lic_admin_key'); }catch(e){}
+  try{localStorage.removeItem('lic_admin_key');}catch(e){}
   $id('adminKey').value='';
   setAuthed(false);
 }
+/* 连接状态:真实探活 /healthz,30s 轮询 */
+function pingConn(){
+  fetch('/healthz').then(function(r){ return r.ok ? r.json() : Promise.reject(); }).then(function(){
+    var d=$id('connDot'), t=$id('connText');
+    if(d) d.style.background='#22c55e'; if(t) t.textContent='已连接';
+  })['catch'](function(){
+    var d=$id('connDot'), t=$id('connText');
+    if(d) d.style.background='#ef4444'; if(t) t.textContent='连接断开';
+  });
+}
+setInterval(pingConn,30000); pingConn();
 (function initAuth(){
   var saved=''; try{ saved=localStorage.getItem('lic_admin_key')||''; }catch(e){}
   if(!saved) return;
@@ -418,7 +430,7 @@ function licenseRowHTML(l,minimal){
       : '<button class="btn btn-outline btn-sm" data-act="restore" data-id="'+esc(l.license_id)+'">恢复</button>';
     ops+='<button class="btn btn-ghost btn-sm" data-act="delete" data-id="'+esc(l.license_id)+'">删除</button>';
   }
-  return '<tr>'+
+  return '<tr data-id="'+esc(l.license_id)+'">'+
     '<td>'+esc(l.customer)+'</td>'+
     '<td><span class="mono id" title="'+esc(l.license_id)+'">'+esc(l.license_id)+'</span></td>'+
     '<td><div class="seat'+(full?' full':'')+'"><span class="mono">'+(l.used||0)+' / '+l.seats+'</span><span class="bar"><i style="width:'+pct+'%"></i></span></div></td>'+
@@ -470,9 +482,12 @@ function toggleSort(k){
 function renderDocsPage(){
   $id('page').innerHTML=
     '<div class="page-head"><h1>接入指南</h1><p>把 License 鉴权接入你的软件</p></div>'+
-    '<section class="card"><div class="card-head"><h2>给 Coding Agent 的对接文档</h2><span class="spacer"></span>'+
-      '<button class="btn btn-sm" onclick="downloadIntegration()">下载对接文档</button></div>'+
-      '<p class="doc-p">一键下载一份 Markdown 对接文档(内嵌本实例真实公钥与有效期参数),直接丢给其他 Coding Agent 即可按规范实现客户端:激活、本地验签、refresh 续期、错误处理,以及管理 API 一览。</p></section>'+
+    '<section class="card"><div class="card-head"><h2>AI 一键对接</h2><span class="hint">推荐:内嵌本实例真实公钥,粘贴给任意 Coding Agent 即可开工</span><span class="spacer"></span>'+
+      '<button class="btn btn-sm" onclick="copyIntegrationPrompt(this)">复制 AI 对接提示词</button></div>'+
+      '<p class="doc-p">提示词 = 任务要求 + 完整对接文档(内嵌真实公钥与有效期参数)。复制后直接发给 Claude / Cursor / Codex 等任意 Coding Agent,它会按规范实现客户端:本地验签、激活、refresh 续期与轮换处理、错误语义、单元测试。</p></section>'+
+    '<section class="card"><div class="card-head"><h2>对接文档</h2><span class="hint">人工阅读 / 归档用</span><span class="spacer"></span>'+
+      '<button class="btn btn-outline btn-sm" onclick="downloadIntegration()">下载 Markdown</button></div>'+
+      '<p class="doc-p">完整 Markdown 对接文档:激活、本地验签、refresh 续期、防重放、错误码,以及管理 API 一览。</p></section>'+
     '<section class="card"><div class="card-head"><h2>客户端公钥</h2><span class="hint">随客户端发布,用于本地验签 access JWT</span></div>'+
       '<div id="pubkeyBox"><div class="empty">加载中…</div></div></section>'+
     '<section class="card"><div class="card-head"><h2>功能标记 (features)</h2></div>'+
@@ -484,6 +499,7 @@ function renderDocsPage(){
         '<li>两张表 <code>licenses</code> / <code>activations</code>;库中只存 license_key 的 SHA256。</li>'+
         '<li>席位:激活行数 ≤ seats;同机重复激活幂等。</li>'+
         '<li>吊销/过期/超席位/被踢 都在 refresh 卡点生效(最长延迟 1 个 access 有效期)。</li>'+
+        '<li>refresh 轮换:旧 token 立即作废,重用返回 401(重用检测)。</li>'+
         '<li>防重放:timestamp(±5 分钟)+ nonce(内存去重 10 分钟)。</li>'+
         '<li>生产请全程 TLS:<code>--tls-cert/--tls-key</code> 或反向代理。</li>'+
       '</ul></section>';
@@ -511,6 +527,17 @@ async function downloadIntegration(){
     toast('已开始下载对接文档','ok');
   }catch(e){ toast('下载失败：'+e.message,'err'); }
 }
+async function copyIntegrationPrompt(btn){
+  var old=btn?btn.textContent:''; if(btn){ btn.disabled=true; btn.textContent='生成中…'; }
+  try{
+    var r=await fetch('/admin/integration-prompt.txt',{ headers:{ 'Authorization':'Bearer '+state.key } });
+    if(r.status===401){ setAuthed(false); state.key=''; try{localStorage.removeItem('lic_admin_key');}catch(e){} loginFail('登录已失效,请重新输入 Admin Key'); return; }
+    if(!r.ok) throw new Error('HTTP '+r.status);
+    var text=await r.text();
+    copy(text,'AI 对接提示词已复制,粘贴给任意 Coding Agent 即可开工');
+  }catch(e){ toast('复制失败：'+e.message,'err'); }
+  if(btn){ btn.disabled=false; btn.textContent=old; }
+}
 
 /* ---------- 页内事件委托 ---------- */
 $id('page').addEventListener('click',function(e){
@@ -530,6 +557,7 @@ $id('page').addEventListener('click',function(e){
   }
   var th=e.target.closest('th[data-sort]'); if(th){ toggleSort(th.getAttribute('data-sort')); return; }
   var pg=e.target.closest('.pg[data-page]'); if(pg){ if(pg.disabled) return; state.pageNum=parseInt(pg.getAttribute('data-page'),10); loadLicenses(); return; }
+  var tr=e.target.closest('tr[data-id]'); if(tr && !e.target.closest('button')){ showDetail(tr.getAttribute('data-id')); return; }
   var b=e.target.closest('button[data-act]'); if(!b) return;
   var act=b.getAttribute('data-act'), id=b.getAttribute('data-id');
   if(act==='detail') showDetail(id);

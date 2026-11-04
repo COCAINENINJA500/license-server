@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
+	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -588,5 +589,39 @@ func TestIntegrationDoc(t *testing.T) {
 	b64 := decodeBody(t, pub)["pubkey_b64"].(string)
 	if !bytes.Contains(rec.Body.Bytes(), []byte(b64)) {
 		t.Fatalf("对接文档应内嵌真实公钥 %s", b64)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// 13. AI 对接提示词: 鉴权 + 内嵌文档全文与真实公钥
+// ---------------------------------------------------------------------------
+
+func TestIntegrationPrompt(t *testing.T) {
+	env := testServer(t)
+	if rec := doReq(t, env, "GET", "/admin/integration-prompt.txt", nil, nil); rec.Code != http.StatusUnauthorized {
+		t.Fatalf("无鉴权应 401: got %d", rec.Code)
+	}
+	rec := doReq(t, env, "GET", "/admin/integration-prompt.txt", nil, adminHeaders())
+	if rec.Code != http.StatusOK {
+		t.Fatalf("提示词应 200: %d %s", rec.Code, rec.Body.String())
+	}
+	if ct := rec.Header().Get("Content-Type"); !strings.Contains(ct, "text/plain") {
+		t.Fatalf("Content-Type 应为 text/plain: %q", ct)
+	}
+	body := rec.Body.String()
+	// 任务头 + 文档全文 + 真实公钥,缺一不可.
+	for _, marker := range []string{"实现 License 客户端授权模块", "对接文档", "machine_hash", "EdDSA"} {
+		if !strings.Contains(body, marker) {
+			t.Fatalf("提示词缺少关键内容: %q", marker)
+		}
+	}
+	pub := decodeBody(t, doReq(t, env, "GET", "/v1/pubkey", nil, nil))["pubkey_b64"].(string)
+	if !strings.Contains(body, pub) {
+		t.Fatalf("提示词应内嵌真实公钥 %s", pub)
+	}
+	// 提示词应是文档的严格超集(任务头 + 全文).
+	doc := doReq(t, env, "GET", "/admin/integration.md", nil, adminHeaders()).Body.String()
+	if !strings.Contains(body, doc) {
+		t.Fatalf("提示词应完整包含对接文档全文")
 	}
 }

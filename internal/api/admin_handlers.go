@@ -33,6 +33,14 @@ func (s *Server) handleIntegrationDoc(w http.ResponseWriter, r *http.Request) {
 	_, _ = w.Write([]byte(doc))
 }
 
+// GET /admin/integration-prompt.txt 实时生成"AI 一键对接提示词":
+// 任务要求 + 对接文档全文(内嵌真实公钥),复制给任意 Coding Agent 即可开工.
+func (s *Server) handleIntegrationPrompt(w http.ResponseWriter, r *http.Request) {
+	prompt := adminui.IntegrationPrompt(s.Signer.Pubkey(), s.Signer.AccessTTL, s.Signer.RefreshTTL)
+	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+	_, _ = w.Write([]byte(prompt))
+}
+
 type issueReq struct {
 	Customer string          `json:"customer"`
 	Days     int             `json:"days"`

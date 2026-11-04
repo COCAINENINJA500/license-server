@@ -64,8 +64,9 @@ func (s *Server) Routes() http.Handler {
 	// 内嵌单租户管理台(页面本身无鉴权,调 API 用 Admin Key).
 	mux.HandleFunc("GET /admin", adminui.HTMLHandler())
 	mux.HandleFunc("GET /admin/", adminui.HTMLHandler())
-	// 实时生成的对接文档(可下载给其他 Coding Agent).
+	// 实时生成的对接文档与 AI 提示词(可下载/复制给其他 Coding Agent).
 	mux.HandleFunc("GET /admin/integration.md", s.requireAdmin(s.handleIntegrationDoc))
+	mux.HandleFunc("GET /admin/integration-prompt.txt", s.requireAdmin(s.handleIntegrationPrompt))
 
 	mux.HandleFunc("POST /admin/licenses", s.requireAdmin(s.handleIssue))
 	mux.HandleFunc("GET /admin/licenses", s.requireAdmin(s.handleList))
