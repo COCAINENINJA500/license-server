@@ -236,6 +236,8 @@ function applyTheme(t){
   var b=$id('themeBtn'); if(b) b.innerHTML=(t==='dark'?ICON_SUN:ICON_MOON);
 }
 function toggleTheme(){ applyTheme(document.documentElement.getAttribute('data-theme')==='dark'?'light':'dark'); }
+/* 初始渲染主题图标: head 内联脚本只设置了 data-theme,按钮图标需在 DOM 就绪后补一次 */
+applyTheme(document.documentElement.getAttribute('data-theme')||'light');
 function toast(msg,type){
   var d=document.createElement('div'); d.className='toast'+(type?' '+type:''); d.textContent=msg;
   $id('msg').appendChild(d);
