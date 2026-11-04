@@ -80,16 +80,15 @@ func (s *Server) handleInsights(w http.ResponseWriter, r *http.Request) {
 }
 
 type issueReq struct {
-	Customer  string          `json:"customer"`
-	ProductID string          `json:"product_id"`
-	Days      *int            `json:"days"`
-	Seats     *int            `json:"seats"`
-	Features  json.RawMessage `json:"features"`
+	Customer  string `json:"customer"`
+	ProductID string `json:"product_id"`
+	Days      *int   `json:"days"`
+	Seats     *int   `json:"seats"`
 }
 
 // POST /admin/licenses 签发 license. license_key 明文仅此一次返回,服务端只存 SHA256.
-// 可选 product_id: 未提供的 days/seats/features 自动带入产品默认值
-// (产品是签发侧模板,license 持有签发时的 features 快照).
+// 功能标记只来自产品模板: 带 product_id 时复制其 features,不关联产品则为空对象;
+// 签发后的微调走 POST /admin/licenses/{id}/features,签发接口不接受 features.
 func (s *Server) handleIssue(w http.ResponseWriter, r *http.Request) {
 	var req issueReq
 	if herr := decodeJSON(r, &req); herr != nil {
@@ -140,14 +139,7 @@ func (s *Server) handleIssue(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	features := "{}"
-	if len(req.Features) > 0 {
-		var v any
-		if err := json.Unmarshal(req.Features, &v); err != nil {
-			writeErr(w, badRequest("features 必须是合法 JSON"))
-			return
-		}
-		features = string(req.Features)
-	} else if product != nil {
+	if product != nil {
 		features = product.Features
 	}
 

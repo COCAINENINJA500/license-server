@@ -758,6 +758,18 @@ $id('page').addEventListener('click',function(e){
 /* ---------- 弹层事件委托 ---------- */
 $id('modalBody').addEventListener('click',function(e){
   var c=e.target.closest('[data-copy]'); if(c){ copy(c.getAttribute('data-copy'),'已复制'); return; }
+  var sel=e.target.closest('.select');
+  if(sel){
+    if(e.target.closest('.select-trigger')){ toggleSelect(sel); return; }
+    var opt=e.target.closest('.select-opt');
+    if(opt){
+      sel.querySelectorAll('.select-opt').forEach(function(o){ o.classList.toggle('active',o===opt); });
+      sel.querySelector('.select-value').textContent=opt.getAttribute('data-label');
+      closeAllSelects();
+      if(sel.id==='issueProduct') applyProduct();
+      return;
+    }
+  }
   var b=e.target.closest('button[data-act]'); if(!b) return;
   var act=b.getAttribute('data-act'), id=b.getAttribute('data-id'), mh=b.getAttribute('data-mhash');
   if(act==='kick'){ confirmDialog('踢掉设备','确定踢掉该设备并释放席位？该设备下次续期将被拒绝。','踢掉',function(){ kick(id,mh); }); }
@@ -792,30 +804,34 @@ function applyProduct(){
 function openIssue(){
   openModal('<h3>签发 License</h3>'+
     '<div class="form-grid"><label class="field">客户名<input id="fCustomer" placeholder="Acme"></label>'+
-    '<label class="field">产品<div class="select" id="issueProduct">'+selectInner(productOpts())+'</div></label>'+
+    '<label class="field">产品<div class="select" id="issueProduct">'+selectInner(productOpts(),'')+'</div></label>'+
     '<label class="field">有效天数<input id="fDays" type="number" value="365" min="1" max="3650"></label>'+
     '<label class="field">席位数<input id="fSeats" type="number" value="5" min="1" max="100000"></label></div>'+
-    '<div class="modal-sub">功能标记（选产品自动带入,可增删字段）</div>'+
-    kvEditorHTML('issue',{"pro":true})+
-    '<p class="hint" style="margin-top:8px">功能标记会写入 access JWT,客户端验签后读取做功能开关 / 配额;产品只是默认模板,签发后可按单调整。</p>'+
+    '<p class="hint" style="margin-top:10px">功能标记由所选产品的模板决定(自定义则为空,签发后可在「详情 → 编辑功能」按单调整)。有效天数 / 席位数选产品后自动带入,可微调。</p>'+
     '<div class="modal-foot"><button class="btn btn-outline" onclick="closeModal()">取消</button><button class="btn" id="issueBtn" onclick="issue()">签发</button></div>');
   // 打开时刷新一次产品下拉
   api('/admin/products').then(function(d){
     state.products=d.products||[];
     var sel=$id('issueProduct'); if(!sel) return;
-    sel.innerHTML=selectInner(productOpts(),'');
+    var act=sel.querySelector('.select-opt.active');
+    var cur=act?act.getAttribute('data-value'):'';
+    sel.innerHTML=selectInner(productOpts(),cur);
   })['catch'](function(){});
+}
+function applyProduct(){
+  var pid=selectedProductID(); if(!pid) return;
+  var p=productById(pid); if(!p) return;
+  $id('fDays').value=p.default_days; $id('fSeats').value=p.default_seats;
 }
 async function issue(){
   var customer=$id('fCustomer').value.trim();
   var days=parseInt($id('fDays').value,10);
   var seats=parseInt($id('fSeats').value,10);
   var pid=selectedProductID();
-  var features=collectKv('issue');
-  if(features===null){ toast('功能标记字段名不能为空','err'); return; }
+  if(!customer){ toast('客户名必填','err'); return; }
   var btn=$id('issueBtn'); btn.disabled=true;
   try{
-    var body={ customer:customer, days:days, seats:seats, features:features };
+    var body={ customer:customer, days:days, seats:seats };
     if(pid) body.product_id=pid;
     var out=await api('/admin/licenses','POST',body);
     closeModal();

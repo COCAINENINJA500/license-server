@@ -85,11 +85,24 @@ func freshNonce() string {
 }
 
 // issueLicense 经管理 API 签发,返回 license_id 与明文 license_key.
+// 功能标记只来自产品模板: 先创建带标准 features 的产品,再按 product_id 签发.
 func issueLicense(t *testing.T, env *testEnv, customer string, days, seats int) (string, string) {
 	t.Helper()
-	rec := doReq(t, env, "POST", "/admin/licenses", map[string]any{
-		"customer": customer, "days": days, "seats": seats,
+	pd := doReq(t, env, "POST", "/admin/products", map[string]any{
+		"name":     fmt.Sprintf("P-%s-%d", customer, time.Now().UnixNano()),
 		"features": map[string]any{"pro": true, "level": "vip"},
+	}, adminHeaders())
+	if pd.Code != http.StatusCreated {
+		t.Fatalf("创建产品失败: code=%d body=%s", pd.Code, pd.Body.String())
+	}
+	var pout struct {
+		ProductID string `json:"product_id"`
+	}
+	if err := json.Unmarshal(pd.Body.Bytes(), &pout); err != nil {
+		t.Fatal(err)
+	}
+	rec := doReq(t, env, "POST", "/admin/licenses", map[string]any{
+		"customer": customer, "product_id": pout.ProductID, "days": days, "seats": seats,
 	}, adminHeaders())
 	if rec.Code != http.StatusCreated {
 		t.Fatalf("签发失败: code=%d body=%s", rec.Code, rec.Body.String())
@@ -678,16 +691,15 @@ func TestProducts(t *testing.T) {
 		t.Fatalf("天数应取产品默认 180: %d", exp)
 	}
 
-	// 签发: 显式 features 覆盖产品模板
+	// 签发: 功能标记只取产品模板(签发接口不接受 features,按单微调走 /features 端点)
 	rec = doReq(t, env, "POST", "/admin/licenses", map[string]any{
 		"customer": "Acme2", "product_id": pid,
-		"features": map[string]any{"pro": false},
 	}, adminHeaders())
 	if rec.Code != http.StatusCreated {
-		t.Fatalf("覆盖 features 签发应 201: %d %s", rec.Code, rec.Body.String())
+		t.Fatalf("按产品签发应 201: %d %s", rec.Code, rec.Body.String())
 	}
-	if feat := decodeBody(t, rec)["features"].(map[string]any); feat["pro"] != false {
-		t.Fatalf("显式 features 应覆盖产品模板: %v", feat)
+	if feat := decodeBody(t, rec)["features"].(map[string]any); feat["pro"] != true {
+		t.Fatalf("features 应取产品模板: %v", feat)
 	}
 
 	// 不存在的 product
