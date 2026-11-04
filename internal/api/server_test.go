@@ -14,8 +14,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/COCAINENINJA500/ed25519-license-server/internal/licensing"
-	"github.com/COCAINENINJA500/ed25519-license-server/internal/store"
+	"github.com/COCAINENINJA500/license-server/internal/licensing"
+	"github.com/COCAINENINJA500/license-server/internal/store"
 )
 
 // ---------------------------------------------------------------------------

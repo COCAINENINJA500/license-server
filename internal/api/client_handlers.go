@@ -9,8 +9,8 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/COCAINENINJA500/ed25519-license-server/internal/licensing"
-	"github.com/COCAINENINJA500/ed25519-license-server/internal/store"
+	"github.com/COCAINENINJA500/license-server/internal/licensing"
+	"github.com/COCAINENINJA500/license-server/internal/store"
 )
 
 // checkUsable 吊销与续费的统一卡点:状态必须 active 且未过期.

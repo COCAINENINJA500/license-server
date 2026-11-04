@@ -1,4 +1,4 @@
-module github.com/COCAINENINJA500/ed25519-license-server
+module github.com/COCAINENINJA500/license-server
 
 go 1.26.4
 

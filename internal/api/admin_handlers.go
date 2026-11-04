@@ -9,8 +9,8 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/COCAINENINJA500/ed25519-license-server/internal/adminui"
-	"github.com/COCAINENINJA500/ed25519-license-server/internal/store"
+	"github.com/COCAINENINJA500/license-server/internal/adminui"
+	"github.com/COCAINENINJA500/license-server/internal/store"
 )
 
 // requireAdmin 管理 API Bearer Key 鉴权(常数时间比较).

@@ -27,10 +27,10 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/COCAINENINJA500/ed25519-license-server/internal/api"
-	"github.com/COCAINENINJA500/ed25519-license-server/internal/config"
-	"github.com/COCAINENINJA500/ed25519-license-server/internal/licensing"
-	"github.com/COCAINENINJA500/ed25519-license-server/internal/store"
+	"github.com/COCAINENINJA500/license-server/internal/api"
+	"github.com/COCAINENINJA500/license-server/internal/config"
+	"github.com/COCAINENINJA500/license-server/internal/licensing"
+	"github.com/COCAINENINJA500/license-server/internal/store"
 )
 
 // version 由构建时 -ldflags "-X main.version=..." 注入.

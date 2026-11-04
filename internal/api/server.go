@@ -5,9 +5,9 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/COCAINENINJA500/ed25519-license-server/internal/adminui"
-	"github.com/COCAINENINJA500/ed25519-license-server/internal/licensing"
-	"github.com/COCAINENINJA500/ed25519-license-server/internal/store"
+	"github.com/COCAINENINJA500/license-server/internal/adminui"
+	"github.com/COCAINENINJA500/license-server/internal/licensing"
+	"github.com/COCAINENINJA500/license-server/internal/store"
 )
 
 // maxBodyBytes JSON 请求体上限.
